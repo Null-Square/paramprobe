@@ -1,20 +1,6 @@
 name: G3c Tiny Shakespeare capacity sweep
 
 on:
-  push:
-    branches: [g3b-learned-causal-replication]
-    paths:
-      - "experiments/g3a_internal_fixed_hash_lm.py"
-      - "experiments/g3b_learned_causal_hash_lm.py"
-      - "experiments/g3b_prefix_reliable_lm.py"
-      - ".github/workflows/g3c_tinyshakespeare.yml"
-  pull_request:
-    branches: [main]
-    paths:
-      - "experiments/g3a_internal_fixed_hash_lm.py"
-      - "experiments/g3b_learned_causal_hash_lm.py"
-      - "experiments/g3b_prefix_reliable_lm.py"
-      - ".github/workflows/g3c_tinyshakespeare.yml"
   workflow_dispatch:
 
 jobs:
