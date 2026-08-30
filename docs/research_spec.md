@@ -1,4 +1,4 @@
-# ParamProbe research specification v1.0
+# ParamProbe research specification v1.1
 
 ## 1. Research question
 
@@ -6,9 +6,11 @@ Can learned parameter capacity increase on external storage while **worst-case e
 
 The central empirical hypothesis is:
 
-> At fixed resident memory `M`, explicit external parameter traffic `Q`, and active compute `C`, task loss can improve as sparsely addressable external learned capacity `P_ext` increases.
+> At fixed resident memory `M`, explicit external parameter traffic `Q`, and active inference compute `C`, task loss can improve as sparsely addressable external learned capacity `P_ext` increases.
 
 The resource theorems define what is possible for the ParamProbe function family. They do **not** imply that every individual training run must improve at every discrete capacity step, nor do they imply finite-`N` superiority over conventional sparse models.
+
+A separate empirical question is how **training sample/optimization cost** must scale with external capacity. ParamProbe's bounded-inference claim does not imply bounded training cost.
 
 ## 2. Parameter-probe model
 
@@ -34,12 +36,15 @@ For finite sweeps claiming fixed routing resources, maximum address width is all
 - **C4:** hard dense function families provide a contrast showing constant external probes with tiny auxiliary state are not universal.
 - **C5:** routing reliability is a separate scaling resource; multi-factor address success can decay as address width grows.
 - **C6:** composite-address collision/Rényi balancing can be estimated using only factor probabilities, but balancing does not determine page utility.
+- **C7:** training exposure/optimization is a separate scaling resource. Keeping inference `M`, `C`, and `Q` bounded does not guarantee that a fixed number of training token assignments is sufficient as `N` grows.
 
 ## 6. Non-claims
 
 ParamProbe does not claim to invent model offloading, sparse MoE, Product-Key routing, learned sparse memory, SSD-resident parameters, direct-I/O expert storage, error-correcting output codes, counterfactual router training, or collision/Rényi load balancing.
 
-It does **not** claim a deterministic monotone scaling law in every individual training seed. Small adjacent-capacity reversals occur on WikiText-2 even though the endpoint capacity effect is sign-consistent across all evaluated seeds.
+It does **not** claim a deterministic monotone scaling law in every individual training seed. Small adjacent-capacity reversals occur on WikiText-2 even though the endpoint capacity effect is sign-consistent across all evaluated tiny-LM seeds.
+
+It does **not** claim that bounded inference resources imply bounded training compute or sample complexity. G6a directly shows that a fixed page-training budget can fail when external capacity is enlarged in a larger subword-LM setting.
 
 It also does **not** claim finite-`N` LM quality superiority over conventional flat MoE routing. Tiny Shakespeare shows the opposite at `N=64`: a task-trained flat router is lower-loss than the current factorized learned router, even with an exact page-shape match and lower active matrix compute.
 
@@ -150,18 +155,46 @@ Learned-routing mean CE is:
 
 The isolated G5 learned seed-7 reversal is therefore better interpreted as a small stochastic local reversal than as evidence for a universal 256-page wall on WikiText-2. Tiny Shakespeare's 256-page learned plateau remains a separate frozen constraining result. Full details are in `docs/g5b_wikitext2_robustness.md`.
 
+### G6a — larger subword-LM fixed-router scale smoke — FAILED
+
+G6a was predeclared before code execution and changes model/tokenization scale rather than tuning the tiny setup:
+
+- train-only byte-level BPE vocabulary 1,024;
+- 446,304-parameter causal Transformer, `d_model=96`, 3 layers, context 128;
+- insertion after block 2;
+- fixed balanced 8-factor hash;
+- page operator `96 -> 20 -> 96`, 3,956 FP32 parameters / 15,824 learned bytes;
+- one 16,384-byte physical block/token (`q=1`);
+- active page matrix compute 3,840 MACs/token;
+- fixed router matrix compute 768 MACs/token;
+- paired capacity points `N=1,16,256`, page seeds 7/8/9;
+- fixed page-training schedule: 120 minibatches of `8 x 128` tokens for every capacity.
+
+Mean validation CE is:
+
+`5.70263753 / 5.70234172 / 5.70345494`
+
+for `N=1/16/256`.
+
+All three seeds improve at `1 -> 16`, then all three regress at `16 -> 256`; 256 pages is also worse than one page in all three seeds. Thus the strict G6a gate fails decisively.
+
+The inference-resource and leakage assertions pass. At `N=256`, normalized validation utilization entropy is `0.90570751` and dead-page fraction is zero, so the failure is not a trivial unused-page effect.
+
+The fixed training schedule supplies 122,880 routed token assignments/run. Mean assignments/page are therefore roughly 122,880 at `N=1`, 7,680 at `N=16`, and only 480 at `N=256`. Sparse training exposure is a concrete post-result hypothesis, not an established cause. G6a is frozen; see `docs/g6a_subword_scale_result.md`.
+
 ## 8. Implementation and evidence policy
 
 - Report external bytes, block bytes, selected pages, logical bytes read, resident routing metadata, routing compute, active operator compute, and I/O mode.
+- Report training token assignments/optimization budget separately from inference-resource claims when capacity changes.
 - Training may keep page tables resident, but inference claims require separately serializable selected-page execution.
 - Retain negative results and infrastructure-only failures separately from scientific results.
-- Tiny Shakespeare and the original three-seed WikiText-2 G5 gate are frozen; do not tune either post hoc.
-- Additional seed studies cannot retroactively change earlier pass/fail criteria.
-- Any larger-model gate must predeclare model scale, tokenization, insertion point, page size, capacity sweep, router resources, optimizer, seeds, and pass criteria before observing its capacity results.
+- Tiny Shakespeare, the original three-seed WikiText-2 G5 gate, and G6a are frozen; do not tune them post hoc.
+- Additional seed or optimization-budget studies cannot retroactively change earlier pass/fail criteria.
+- Any larger-model follow-up must be separately predeclared with model/tokenizer/page/router/training-budget changes explicit.
 - Virtualized/cloud storage timing is diagnostic unless the physical storage stack is sufficiently characterized.
 
 ## 9. Current publication boundary
 
-> Across canonical Tiny Shakespeare and WikiText-2 raw, inactive external page capacity improves mean validation loss under a strict one-page external-parameter traffic budget and fixed active page compute. On WikiText-2, the endpoint benefit is sign-consistent across all 13 evaluated page-training seeds for both fixed and learned factorized routing; learned routing is strictly monotone through 256 pages in 12/13 seeds. This is evidence for a robust capacity trend, not a deterministic per-seed scaling law. Conventional finite flat MoE routing remains lower-loss at `N=64` in the tiny benchmark. Separately, trained LM pages execute through real `pread` and `O_DIRECT` fixed-block storage with numerically equivalent outputs and exactly one page of explicit parameter traffic per token.
+> In the tiny byte-level setting, inactive external page capacity improves validation loss under a hard one-page inference traffic budget across Tiny Shakespeare and WikiText-2, with strong 13-seed robustness on WikiText-2. The hard file-backed execution contract is also realized exactly. However, the first materially larger, subword-tokenized WikiText-2 test does **not** reproduce the capacity curve under a fixed page-training budget: 16 pages improve loss, while 256 pages regress in all three seeds despite high route utilization. This exposes training exposure/optimization as an additional empirical scaling resource even though inference traffic and active page compute remain bounded.
 
-This is **not yet Q1-ready evidence**. The second-corpus robustness blocker is now substantially reduced. The largest remaining empirical blockers are: demonstrate the effect in a materially larger, subword-tokenized LM setting; run the trained-page storage path on characterized bare-metal hardware; and then evaluate whether the quality/latency/capacity tradeoff remains compelling at realistic scale.
+This is **not Q1-ready evidence**. The primary scientific blocker is now sharper: determine whether the larger-model 256-page failure is an optimization/sample-exposure limitation or a more fundamental routing/operator mismatch. Publication-grade bare-metal storage validation remains a separate systems blocker.
