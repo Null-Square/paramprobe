@@ -27,8 +27,12 @@ jobs:
           python -m pip install -e . --no-deps
       - name: Fetch and verify WikiText-2 raw
         run: |
+          # The historical research.metamind.io S3 endpoint currently returns
+          # a small error document on hosted runners. This mirror stores the
+          # byte-identical original archive; the original published size/SHA-256
+          # below remain the authority and are hard-checked before extraction.
           curl --fail --location --retry 3 \
-            https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-2-raw-v1.zip \
+            'https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip?download=true' \
             -o .cache/wikitext-2-raw-v1.zip
           python - <<'PY' | tee results/dataset_archive.txt
           import hashlib
@@ -36,6 +40,7 @@ jobs:
           path = Path('.cache/wikitext-2-raw-v1.zip')
           data = path.read_bytes()
           digest = hashlib.sha256(data).hexdigest()
+          print('transport_source=huggingface_ggml-org_ci_exact_archive_mirror')
           print(f'archive_bytes={len(data)}')
           print(f'archive_sha256={digest}')
           expected_size = 4721645
