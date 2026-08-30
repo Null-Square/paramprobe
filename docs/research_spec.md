@@ -1,4 +1,4 @@
-# ParamProbe research specification v0.1
+# ParamProbe research specification v0.2
 
 ## 1. Research question
 
@@ -34,9 +34,11 @@ Blocks are streamed sequentially through a reusable `B`-byte workspace, so the e
 
 A flat `N`-way router is disallowed in the asymptotic claim because it can hide `Theta(N)` resident metadata.
 
-For the first construction, let `N = m^r`. Represent each address as an `r`-tuple over radix `m`. With additive factor scores and factor-key width `s`, key metadata is `Theta(r m s) = Theta(m s log_m N)` scalars. The complete Cartesian address space is never materialized.
+For the first asymptotic construction, let `N = m^r`. Represent each address as an `r`-tuple over radix `m`. With additive factor scores and factor-key width `s`, key metadata is `Theta(r m s) = Theta(m s log_m N)` scalars. The complete Cartesian address space is never materialized.
 
 The current exact top-k implementation uses best-first search over the sorted additive-score lattice. G0 tests it against brute-force enumeration on small address spaces.
+
+For controlled empirical sweeps that claim **strictly fixed** resident router size and active routing compute, we must not resize this factorized router as `N` changes. Instead we allocate a maximum address width once and vary usable external capacity by masking/merging address bits, or use a stateless router for a diagnostic experiment. This distinction prevents an `O(log N)` metadata change from being hidden inside a nominally fixed-memory comparison.
 
 ## 5. Claims we intend to establish
 
@@ -74,7 +76,7 @@ The intended novelty is the **hard external parameter-probe budget as an archite
 
 ## 7. Falsification gates
 
-### G0 — invariants
+### G0 — invariants — PASSED (initial implementation)
 
 Pass only if:
 
@@ -83,13 +85,31 @@ Pass only if:
 - logical probes equal selected block count exactly;
 - bytes read equal `q B` exactly.
 
-### G1 — synthetic associative capacity
+Initial status: 4 deterministic tests pass. A 16 MiB file-backed store with `B=4096`, `q=2`, and 200 randomized trials produced exactly 8192 logical bytes/invocation and zero numerical difference from resident execution.
 
-Construct a learned addressing task with many latent associations. Hold controller size, active compute, `q`, and `B` fixed while increasing `N`.
+### G1a — collision-limited associative capacity — PASSED
 
-Primary question: does held-out association error improve with larger external capacity without increasing active I/O?
+Use a stateless deterministic one-probe router and closed-form optimal page values. Hold `q`, `B`, resident router state, and active routing algorithm fixed while increasing only `N`.
 
-Pre-register a null outcome as meaningful: if capacity does not improve across at least a 16x `N` sweep under matched optimization, the main scaling hypothesis is weakened.
+The analytic null model is the collision floor. For `A` iid unit-variance targets uniformly hashed into `N` pages, conditioned on `O` occupied pages,
+
+`E[MSE | O] = 1 - O/A`,
+
+and
+
+`E[O] = N * (1 - (1 - 1/N)^A)`.
+
+Observed on `A=16384`, target dimension 32, `q=1`, `B=4096`: expanding logical external capacity from 0.25 MiB to 1 GiB reduced MSE from 0.996204 to 0.030685 while keeping logical parameter traffic exactly 4096 bytes/query. The curve closely tracks the analytic collision prediction. See `docs/g1a_hash_capacity.md`.
+
+This validates the capacity/I-O abstraction only; it is not evidence for neural or language-model scaling.
+
+### G1b — learned fixed-controller associative capacity — NEXT
+
+Replace the stateless router with a fixed-size learned controller whose maximum address width and compute graph are allocated once for the entire sweep. Vary usable external capacity by address masking/merging, so controller parameters, active routing compute, `q`, and `B` remain literally fixed across `N`.
+
+Primary question: can training exploit added inactive pages without router collapse or hidden resource growth?
+
+Pre-register a null outcome as meaningful: if learned associative error does not improve across at least a 16x external-capacity sweep under matched optimization, the main scaling hypothesis is materially weakened.
 
 ### G2 — router stress test
 
@@ -97,7 +117,7 @@ Sweep factor depth `r`, radix `m`, and top-k `q`. Measure utilization entropy, c
 
 ### G3 — language modeling
 
-Only after G1/G2. Compare against matched dense, flat sparse-memory, and PEER-like baselines under resident-parameter, active-FLOP, and **external-bytes/token** constraints.
+Only after G1b/G2. Compare against matched dense, flat sparse-memory, and PEER-like baselines under resident-parameter, active-FLOP, and **external-bytes/token** constraints.
 
 Primary plot: validation loss versus total external learned capacity at fixed `M`, `C`, and `Q`.
 
@@ -107,6 +127,8 @@ Add aligned uncached/direct-I/O backends. Report cold and warm results separatel
 
 ## 8. Immediate implementation policy
 
-The first code intentionally uses NumPy and explicit `pread`, not PyTorch. This isolates the addressing/probe semantics from autograd and framework caching. Training code enters only at G1.
+G0 and G1a intentionally use NumPy and explicit `pread`/closed-form calculations to isolate addressing, probe semantics, and the analytic capacity law from autograd and framework caching.
+
+PyTorch enters at G1b for the first learned-routing experiment.
 
 Every experiment must emit the exact resource quantities it claims to hold fixed: total external bytes, block bytes, selected blocks, logical bytes read, and resident model metadata.
