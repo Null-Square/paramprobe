@@ -80,6 +80,33 @@ This is the first ParamProbe gate with jointly learned nonlinear pages, **task-o
 
 Counterfactual routing itself is prior work; see [`docs/g2f_counterfactual_routing.md`](docs/g2f_counterfactual_routing.md) for the novelty boundary and limitations.
 
+### G3a — internal language-model precheck: passed with a fixed diagnostic router
+
+The first LM attempt placed ParamProbe directly before the LM head and failed the monotone capacity gate. Diagnostics also showed that realized next-token counterfactual losses contain privileged future information and are therefore an invalid direct routing target for a causal language model.
+
+G3a then freezes a two-block byte-level Transformer and inserts ParamProbe **between block 1 and block 2**. A fixed balanced six-factor context hash is allocated once and reused across the whole capacity sweep, which removes learned-routing instability from this capacity/insertion test.
+
+The strict page operator is `48 -> 10 -> 48`:
+
+- 1,018 FP32 learned parameters;
+- 4,072 learned bytes, padded to one 4,096-byte page;
+- `q_infer = 1`;
+- identical fixed router metadata/MACs across 1/4/16/64 pages;
+- identical active page MLP and downstream Transformer compute.
+
+On the environment-local 1.2 MiB code-corpus precheck, the frozen backbone has validation CE `2.302792`. Across three independent page-training seeds:
+
+| External pages | Validation CE |
+|---:|---:|
+| 1 | `2.29944 ± 0.00081` |
+| 4 | `2.29751 ± 0.00037` |
+| 16 | `2.29629 ± 0.00014` |
+| 64 | **`2.29521 ± 0.00028`** |
+
+The ordering is monotone in every seed and no validation page is dead. This is a controlled **precheck**, not a benchmark result: the container used local Python/PyTorch source because the standard Tiny Shakespeare file could not be downloaded into the runtime. Publication-grade G3 must rerun on a named corpus.
+
+See [`docs/g3a_language_precheck.md`](docs/g3a_language_precheck.md).
+
 ## Reproduce
 
 ```bash
@@ -95,6 +122,7 @@ python experiments/g2c_joint_supervised_router.py
 python experiments/g2d_task_only_top2.py
 python experiments/g2e_composite_collision.py
 python experiments/g2f_counterfactual_utility.py
+python experiments/g3a_internal_fixed_hash_lm.py --retrain-backbone
 ```
 
-See [`docs/research_spec.md`](docs/research_spec.md) for the formal model and claims. The next core gate is a tiny language model with one ParamProbe layer under the same explicit inference-probe accounting.
+See [`docs/research_spec.md`](docs/research_spec.md) for the formal model and claims. The next core gate is **G3b: learned causal routing at the successful internal insertion point, without using realized future-token oracle labels as router targets.**
