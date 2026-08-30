@@ -105,12 +105,14 @@ For each seed:
 
 Reuse the frozen G6a validation hidden-state bank: 40 batches x 8, context 128, seed 1234.
 
+Perturbation route stability uses that same deterministic validation hidden-state bank, feature-scaled noise std `0.08`, and a dedicated noise seed **4321**. This diagnostic does not enter the primary pass criterion.
+
 Report:
 
 - per-seed validation CE;
 - three-seed mean/sample std;
 - normalized utilization entropy and dead-page fraction at N=16/64/256;
-- perturbation route stability for each active address width using a deterministic validation hidden-state bank and feature-scaled noise std 0.08;
+- perturbation route stability for each active address width;
 - per-factor training-only reliability and final factor order;
 - router parameters and matrix MACs/token;
 - page parameters/MACs, q, block bytes, and logical bytes/token;
