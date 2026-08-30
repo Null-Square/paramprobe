@@ -198,3 +198,5 @@ The strongest current empirical statement is:
 > On canonical Tiny Shakespeare, inactive external page capacity can improve validation loss under a strict one-page external-parameter traffic budget and fixed active page compute. A paired fixed router scales monotonically through 256 pages. The present learned factorized router is strong through 64 pages but plateaus at 256, and conventional finite flat MoE routing remains lower-loss at `N=64`.
 
 This is **not yet Q1-ready evidence**. The remaining blockers are concrete rather than conceptual: reproduce the capacity effect on at least a second named language corpus; execute trained LM pages through the serialized/file-backed storage path under the same measured probe contract; and demonstrate the effect on a larger or more standard language-model setting before elevating the result from a controlled diagnostic to a publication claim.
+
+The frozen matched-control evidence and exact workflow artifacts are indexed in `docs/g3d_j_tinyshakespeare_controls.md`.
