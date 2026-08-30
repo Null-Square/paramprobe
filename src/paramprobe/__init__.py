@@ -1,9 +1,15 @@
 """ParamProbe research primitives."""
 
 from .addressing import FactorizedTopKRouter, mixed_radix_id
-from .store import FileParameterStore, InMemoryParameterStore, ProbeStats
+from .store import (
+    DirectIOParameterStore,
+    FileParameterStore,
+    InMemoryParameterStore,
+    ProbeStats,
+)
 
 __all__ = [
+    "DirectIOParameterStore",
     "FactorizedTopKRouter",
     "FileParameterStore",
     "InMemoryParameterStore",
