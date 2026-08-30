@@ -6,11 +6,11 @@ ParamProbe studies neural architectures whose learned parameter capacity may gro
 
 The core abstraction is a parameter store split into fixed-size blocks of `B` bytes. A ParamProbe layer may read at most `q` blocks per invocation, so explicit external parameter traffic is bounded by `q * B`, independent of total external capacity `N * B`.
 
-The empirical scaling hypothesis is:
+The empirical hypothesis is:
 
-> At fixed resident memory, active compute, and external parameter I/O, increasing sparsely addressable external learned capacity can improve task quality.
+> At fixed resident memory, active inference compute, and external parameter I/O, increasing sparsely addressable external learned capacity can improve task quality.
 
-The repository is organized to falsify that hypothesis cheaply before language-model experiments.
+The repository is organized around falsification gates rather than a predetermined architecture.
 
 ## Current status
 
@@ -19,41 +19,66 @@ The repository is organized to falsify that hypothesis cheaply before language-m
 - exact factorized top-k retrieval matches brute force on tested small spaces;
 - file-backed and resident page operators agree numerically;
 - a `q=2`, `B=4096` smoke test performs exactly 8,192 explicit parameter bytes per invocation independent of external store size;
-- Linux `O_DIRECT + preadv` support provides a page-cache-bypassing backend for later physical-I/O studies.
+- Linux `O_DIRECT + preadv` support provides a page-cache-bypassing backend for physical-I/O studies.
 
-### G1 — associative capacity and routing: passed with a routing limitation
+### G1 — associative capacity: passed, with an address-reliability limitation
 
-At fixed one-page I/O, increasing external capacity reduces collision-limited associative error. A fixed learned router also benefits from added capacity when address reliability is high enough.
+At fixed one-page I/O, increasing external capacity reduces collision-limited associative error. A learned factorized router can also exploit extra capacity, but marginal factor errors compound as address width grows. Error-correcting addresses remain a conditional sub-direction rather than a universal fix.
 
-The main failure mode is the **address-reliability wall**: a hard 12-factor router with about 92.5% marginal factor accuracy achieved only about 39.6% exact-address accuracy. Error-correcting parameter addresses improve this in a matched-compute proof-of-concept, but coding is retained as a conditional sub-direction rather than assumed to solve routing universally.
+### G2a/G2b — nonlinear page operators: passed
 
-### G2a — nonlinear operator capacity: passed
+External pages contain genuine nonlinear operators, including complete two-layer micro-MLPs. With routing controlled, task error decreases as the number of inactive external operators grows while active page shape, inference MACs, `q`, and `B` stay fixed.
 
-Each external 4 KiB page stores a `64 x 16` FP32 matrix used in the nonlinear function
+For the 8→32→8 page MLP, three-seed normalized error falls from about `0.998` at one page to `0.035` at 256 pages with one 4 KiB page active per query.
 
-`f_i(z) = A_i tanh(R z + b)`.
+See [`docs/g2_operator_capacity.md`](docs/g2_operator_capacity.md).
 
-The router, resident nonlinear feature map, active external matrix multiply, `q=1`, and `B=4096` are fixed. With a reliable router, increasing usable pages from 1 to 4096 reduces normalized operator error from about 1 to 0, closely matching the analytic collision law `1 - occupied/items`.
+### G2c — jointly learned router + pages with address supervision: passed
 
-A deliberately noisy-router control leaves the oracle capacity curve intact but prevents the learned system from using the extra pages, cleanly separating operator capacity from routing reliability.
+A fixed router and nonlinear pages are trained jointly. In a hard routing setting the router reaches about 87.7% exact-address accuracy, uses essentially the whole page space, and normalized error falls from about `0.997` to `0.323` as pages grow 1→256. This establishes joint trainability but still supplies semantic page-address targets.
 
-### G2b — fully learned page-sized MLPs: passed
+### G2d — task-only top-2 routing: negative/constraining
 
-Each external page contains a complete two-layer tanh micro-MLP. The default 8→32→8 operator has 552 FP32 parameters (2,208 learned bytes) and is padded/read as one physical 4 KiB parameter page.
+Removing address labels exposes a real failure: ordinary task loss plus factor-level balancing can discover useful specialization at high capacity but produces a non-monotone capacity curve. Balanced routing factors do not imply balanced **composite** addresses.
 
-Across three seeds, with oracle routing used to isolate operator expressivity, normalized held-out error is:
+### G2e — composite-address Rényi balancing: passed as a load-balancing result, not a routing solution
+
+For a factorized binary address, the full-address collision probability can be computed from `r=log2(N)` factor probabilities without materializing an `N`-way router. The normalized objective
+
+`log(N * C2) = log(N) - H2`
+
+directly controls composite-address collapse.
+
+On the adversarial task it improves utilization and gives three-seed NMSE approximately:
+
+`0.987 → 1.030 → 0.920 → 0.279` for 1/4/16/64 pages.
+
+The 4-page regression is intentionally retained: **load balancing does not tell the router which page is useful for a particular input.**
+
+See [`docs/theory_composite_collision.md`](docs/theory_composite_collision.md).
+
+### G2f — fixed-budget counterfactual utility routing: passed synthetic gate
+
+G2f supplies no semantic address labels. During training only, four candidate pages are evaluated per example and their observed task losses are distilled into the factorized router. The candidate budget is fixed at four for every multi-page condition. Inference is still a hard one-page route:
+
+- `q_infer = 1`;
+- `B = 4096 bytes`;
+- identical router size and routing MACs across the sweep;
+- identical active page-MLP shape and inference MACs;
+- no dead pages in the three-seed 64-page runs.
+
+On the deliberately adversarial control where semantic context prototypes and teacher MLPs are sampled independently, three-seed normalized MSE is:
 
 | External pages | Normalized MSE |
 |---:|---:|
-| 1 | 0.9980 ± 0.0005 |
-| 4 | 0.9878 ± 0.0006 |
-| 16 | 0.9519 ± 0.0029 |
-| 64 | 0.8318 ± 0.0097 |
-| 256 | **0.0349 ± 0.0004** |
+| 1 | `0.9856 ± 0.0048` |
+| 4 | `0.9557 ± 0.0133` |
+| 16 | `0.8258 ± 0.0088` |
+| 64 | **`0.2242 ± 0.0567`** |
 
-Active MLP shape, active MACs, `q=1`, and 4 KiB parameter traffic/query are identical at every point; only inactive external operator count grows.
+This is the first ParamProbe gate with jointly learned nonlinear pages, **task-only routing, no address labels, fixed counterfactual training budget, and monotone held-out improvement as external capacity grows while inference remains one 4 KiB parameter probe.**
 
-See [`docs/g2_operator_capacity.md`](docs/g2_operator_capacity.md) for the derivation, negative controls, and methodology.
+Counterfactual routing itself is prior work; see [`docs/g2f_counterfactual_routing.md`](docs/g2f_counterfactual_routing.md) for the novelty boundary and limitations.
 
 ## Reproduce
 
@@ -66,6 +91,10 @@ python experiments/g1b_learned_prefix_capacity.py
 python experiments/g1c_coded_addressing.py
 python experiments/g2a_nonlinear_basis_capacity.py
 python experiments/g2b_micro_mlp_capacity.py
+python experiments/g2c_joint_supervised_router.py
+python experiments/g2d_task_only_top2.py
+python experiments/g2e_composite_collision.py
+python experiments/g2f_counterfactual_utility.py
 ```
 
-See [`docs/research_spec.md`](docs/research_spec.md) for the formal model, claims, non-claims, and experimental gates.
+See [`docs/research_spec.md`](docs/research_spec.md) for the formal model and claims. The next core gate is a tiny language model with one ParamProbe layer under the same explicit inference-probe accounting.
