@@ -1,0 +1,105 @@
+name: G6a larger subword LM capacity gate
+
+on:
+  push:
+    branches: [g3b-learned-causal-replication]
+    paths:
+      - "experiments/g6a_subword_scale_lm.py"
+      - "docs/g6a_subword_scale_predeclared.md"
+      - ".github/workflows/g6a_subword_scale.yml"
+  workflow_dispatch:
+
+jobs:
+  subword-scale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned CPU research dependencies
+        run: |
+          mkdir -p .cache results
+          python -m pip install --upgrade pip
+          python -m pip install "numpy==2.3.5" "tokenizers==0.23.1"
+          python -m pip install "torch==2.10.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps
+
+      - name: Fetch and verify WikiText-2 raw
+        run: |
+          curl --fail --location --retry 3 \
+            'https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip?download=true' \
+            -o .cache/wikitext-2-raw-v1.zip
+          python - <<'PY' | tee results/dataset_archive.txt
+          import hashlib
+          from pathlib import Path
+          data = Path('.cache/wikitext-2-raw-v1.zip').read_bytes()
+          digest = hashlib.sha256(data).hexdigest()
+          expected_size = 4721645
+          expected_sha = 'ef7edb566e3e2b2d31b29c1fdb0c89a4cc683597484c3dc2517919c615435a11'
+          print(f'archive_bytes={len(data)}')
+          print(f'archive_sha256={digest}')
+          if len(data) != expected_size or digest != expected_sha:
+              raise SystemExit('WikiText-2 raw archive identity mismatch')
+          PY
+          unzip -q .cache/wikitext-2-raw-v1.zip -d .cache/
+          python - <<'PY' | tee results/dataset_splits.txt
+          import hashlib
+          from pathlib import Path
+          root = Path('.cache/wikitext-2-raw')
+          for name in ['wiki.train.raw', 'wiki.valid.raw', 'wiki.test.raw']:
+              data = (root / name).read_bytes()
+              print(f'{name}_bytes={len(data)}')
+              print(f'{name}_sha256={hashlib.sha256(data).hexdigest()}')
+          PY
+
+      - name: Run frozen G6a protocol
+        env:
+          PYTHONPATH: .:src:experiments
+        run: |
+          PYTHONUNBUFFERED=1 python experiments/g6a_subword_scale_lm.py \
+            --train-path .cache/wikitext-2-raw/wiki.train.raw \
+            --validation-path .cache/wikitext-2-raw/wiki.valid.raw \
+            --tokenizer-json .cache/g6a_tokenizer.json \
+            --retrain-tokenizer \
+            --checkpoint .cache/g6a_subword_base.pt \
+            --retrain-backbone \
+            --used-bits 0,4,8 \
+            --seeds 7,8,9 \
+            | tee results/g6a_subword_scale.txt
+
+      - name: Record reproducibility hashes and environment
+        if: always()
+        run: |
+          if [ -f .cache/g6a_tokenizer.json ]; then
+            cp .cache/g6a_tokenizer.json results/g6a_tokenizer.json
+          fi
+          if [ -f .cache/g6a_subword_base.pt ]; then
+            cp .cache/g6a_subword_base.pt results/g6a_subword_base.pt
+          fi
+          sha256sum results/g6a_tokenizer.json results/g6a_subword_base.pt 2>/dev/null \
+            > results/model_artifact_hashes.txt || true
+          python - <<'PY' > results/environment.txt
+          import platform
+          import numpy
+          import torch
+          import tokenizers
+          print(f'python={platform.python_version()}')
+          print(f'platform={platform.platform()}')
+          print(f'numpy={numpy.__version__}')
+          print(f'torch={torch.__version__}')
+          print(f'tokenizers={tokenizers.__version__}')
+          print(f'torch_threads={torch.get_num_threads()}')
+          PY
+
+      - name: Upload G6a results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g6a-subword-scale-results
+          path: results/
+          if-no-files-found: error
