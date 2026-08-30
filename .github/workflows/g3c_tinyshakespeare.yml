@@ -31,13 +31,14 @@ jobs:
 
       - name: Install pinned research dependencies
         run: |
+          mkdir -p .cache results
           python -m pip install --upgrade pip
-          python -m pip install "numpy==2.3.5" "torch==2.10.0"
-          python -m pip install -e .
+          python -m pip install "numpy==2.3.5"
+          python -m pip install "torch==2.10.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps
 
       - name: Fetch canonical Tiny Shakespeare corpus
         run: |
-          mkdir -p .cache results
           curl --fail --location --retry 3 \
             https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt \
             -o .cache/tinyshakespeare.txt
@@ -84,6 +85,7 @@ jobs:
       - name: Record environment
         if: always()
         run: |
+          mkdir -p results
           python - <<'PY' > results/environment.txt
           import platform
           import numpy
