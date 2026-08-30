@@ -13,7 +13,7 @@ The main conclusions are:
 5. at fixed 1 MiB external capacity, 16 KiB pages outperform 4 KiB and 64 KiB pages in all three paired seeds;
 6. pinned CPU CI passes 10/10 tests.
 
-These results support inactive conditional capacity under a hard probe budget. They do **not** support finite-`N` routing-quality superiority over flat MoE.
+These results support inactive conditional capacity under a hard probe budget. They do **not** support finite-`N` routing-quality superiority over flat MoE. No further Tiny Shakespeare router tuning should be used to erase these boundaries.
 
 ## Common setup
 
