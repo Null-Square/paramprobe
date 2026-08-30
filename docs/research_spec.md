@@ -1,84 +1,100 @@
-# ParamProbe research specification v0.4
+# ParamProbe research specification v0.5
 
 ## 1. Research question
 
-Can learned parameter capacity increase on external storage while **worst-case external parameter traffic, resident working memory, and active compute remain bounded**, and does that extra inactive capacity improve learning quality?
+Can learned parameter capacity increase on external storage while **worst-case external parameter traffic, resident working memory, and active inference compute remain bounded**, and does that extra inactive capacity improve learned task quality?
 
 The central empirical hypothesis is:
 
 > At fixed resident memory `M`, explicit external parameter traffic `Q`, and active compute `C`, task loss can improve as sparsely addressable external learned capacity `P_ext` increases.
 
-The theory guarantees resource bounds for the proposed function family. It does **not** guarantee the empirical scaling hypothesis.
+The resource theorems below define what is possible for the ParamProbe function family. They do **not** guarantee the empirical scaling hypothesis.
 
 ## 2. Parameter-probe model
 
-Partition external learned state into `N` equal blocks `P_0, ..., P_{N-1}`, each exactly `B` bytes. For an input `x`, let `Pi_B(f, x)` be the number of block-read operations used to evaluate the external-memory part of `f`.
+Partition external learned state into `N` equal blocks `P_0, ..., P_{N-1}`, each exactly `B` bytes. For an input `x`, let `Pi_B(f, x)` be the number of external parameter-block reads used while evaluating the external-memory component of `f`.
 
-A `q`-probe layer must satisfy the hard invariant
+A `q`-probe layer must satisfy
 
 `sup_x Pi_B(f, x) <= q`.
 
-Logical explicit parameter traffic is therefore bounded by `q B` bytes per layer invocation. Physical device traffic is measured separately; logical reads are not a substitute for uncached storage measurements.
+Therefore logical explicit parameter traffic is bounded by
+
+`Q <= q B`
+
+per invocation, independent of total external capacity `N B`.
+
+Physical device traffic is measured separately. Logical probe counting is not a substitute for uncached/direct-I/O measurements.
 
 ## 3. Page-sized conditional operator
 
-Given resident hidden state `h in R^d`, a resident router returns at most `q` block ids. Each selected block encodes a complete micro-operator `E_p`, for example a small MLP. A generic layer is
+Given resident hidden state `h in R^d`, a resident router returns at most `q` external block ids. Each selected block encodes a complete micro-operator `E_p`, for example a small MLP. A generic layer is
 
 `y = h + sum_{p in R(h)} g_p(h) E_p(h)`.
 
-The implementation must never require an expert object larger than one block for strict probe-bound experiments. Blocks are streamed sequentially through a reusable `B`-byte workspace, so the external-operator workspace does not scale with `N`.
+For strict probe-bound experiments, each `E_p` must fit inside one block. Selected pages are streamed one at a time through a reusable `B`-byte workspace, so external-operator workspace does not scale with `N`.
 
-`B` is an **architectural hyperparameter**, not merely a filesystem detail. Larger pages provide more local operator capacity and better amortize fixed storage-read latency, but increase bytes per probe. Experiments must therefore sweep `B` jointly with `q`.
+`B` is an architectural hyperparameter rather than merely a filesystem property: larger pages provide greater local operator capacity and can amortize fixed storage latency, but increase bytes per probe.
 
 ## 4. Scalable addressing
 
-A flat `N`-way router is disallowed in the asymptotic claim because it can hide `Theta(N)` resident metadata.
+A flat `N`-way router is excluded from the asymptotic claim because it can hide `Theta(N)` resident metadata.
 
-For the first asymptotic construction, let `N = m^r`. Represent each address as an `r`-tuple over radix `m`. With additive factor scores and factor-key width `s`, key metadata is
+For the reference factorized construction, let
 
-`Theta(r m s) = Theta(m s log_m N)`
+`N = m^r`.
 
-scalars. The complete Cartesian address space is never materialized.
+Represent an address as an `r`-tuple over radix `m`. With subkey width `s`, resident key metadata is
 
-The exact top-k reference implementation uses best-first search over the sorted additive-score lattice and is tested against brute force on small spaces.
+`Theta(r m s) = Theta(m s log_m N)`.
 
-For empirical sweeps that claim **strictly fixed** resident router size and active routing compute, the router is allocated once at maximum address width. Smaller external-capacity conditions use prefixes/masks of the same output so controller parameters and routing compute remain literally fixed.
+The complete Cartesian address space is never materialized. The exact top-k reference implementation uses best-first search and is tested against brute force on small spaces.
 
-## 5. Claims we intend to establish
+For empirical sweeps claiming **strictly fixed** resident router size and active routing compute, the maximum address width is allocated once and smaller capacities use prefixes/masks of that same output.
+
+## 5. Core theoretical claims
 
 ### C1 — hard logical probe bound
 
-For a layer that selects at most `q` complete block-sized operators and evaluates them one at a time, logical external parameter traffic is at most `q B`, independent of `N`.
+If at most `q` complete block-sized operators are selected and evaluated sequentially, logical external parameter traffic is at most `qB`, independent of `N`.
 
 ### C2 — bounded external-operator workspace
 
-The additional working set required to evaluate selected external operators is `B + O(d + q)` bytes/scalars up to implementation constants, independent of `N`, provided blocks are processed sequentially and no external cache is counted as resident model state.
+Sequential page evaluation requires additional working storage of approximately
 
-### C3 — sublinear routing metadata for the factorized construction
+`B + O(d + q)`
 
-For `N=m^r`, resident factor-key metadata is `Theta(r m s)`. With constant `m,s`, it grows as `Theta(log N)` while external learned capacity grows as `Theta(NB)`.
+up to implementation constants, independent of total external page count.
 
-### C4 — dense-function contrast, not an equivalence theorem
+### C3 — sublinear routing metadata
 
-Known cell-probe lower bounds for exact online Boolean / `F_2` matrix-vector multiplication show that arbitrary dense transformations do not generally admit constant external probes with tiny auxiliary state. In particular, Chakraborty, Kamma, and Larsen (STOC 2018) show a tradeoff `t r = ~Omega(n^3)` for `n < r < n^2`, and `t = ~Omega(n^2)` for `r <= n`, where `r` is side information and `t` is query probes.
+For `N=m^r`, factor-key metadata is `Theta(rms)`. With constant `m,s`, routing metadata grows as `Theta(log N)` while external learned capacity grows as `Theta(NB)`.
 
-We will **not** claim that every conventional dense neural layer literally requires reading every stored weight on every input. The lower bound is a contrast for a hard dense function family.
+### C4 — dense-function contrast
+
+Known cell-probe lower bounds for exact online Boolean / `F_2` matrix-vector multiplication show that arbitrary dense transformations do not generally admit constant external probes with tiny auxiliary state. Chakraborty, Kamma, and Larsen (STOC 2018) give `t r = ~Omega(n^3)` for `n < r < n^2` and `t = ~Omega(n^2)` for `r <= n` in their model.
+
+This is a contrast for a hard dense function family. ParamProbe does **not** claim that every conventional neural layer literally reads every stored weight on every input.
 
 ### C5 — routing reliability is a separate scaling resource
 
-G1b exposed that logarithmic routing metadata does not imply reliable addressing. Under an independent binary-factor error model with per-factor correctness `p`, a raw `r`-bit address succeeds with probability `p^r`. Since `r = log_2 N`, this tends to zero for fixed `p < 1`.
+If an uncoded binary factor is correct independently with probability `p`, an `r`-bit address succeeds with probability `p^r`. Since `r=log_2 N`, address reliability can fall as the address space grows even while marginal factor accuracy appears high.
 
-Error-correcting addresses can improve finite reliability and, under explicit channel assumptions, can preserve asymptotic reliability with only `Theta(log N)` routing symbols. This remains a **conditional sub-theory**, not the central ParamProbe claim. See `docs/theory_address_reliability.md` and `docs/theory_routing_channel.md`.
+Error-correcting addresses can improve this under explicit channel assumptions, but the repository retains negative code-rate results showing that redundancy can be difficult to learn. Coding is therefore a conditional sub-direction.
 
-### C6 — nonlinear operator collision law for linear-in-page-parameter families
+### C6 — composite-address collision can be regularized in `O(log N)` routing space
 
-For operators of the form
+For factorized Bernoulli page probabilities `p_i` and `p_j`, the probability that two independently sampled complete addresses match is
 
-`f_i(z) = A_i phi(z)`,
+`K(i,j) = product_f [p_if p_jf + (1-p_if)(1-p_jf)]`.
 
-where `phi` may be nonlinear but is shared/resident and `A_i` is page-local, the population-risk-minimizing page parameter for a collision group is the arithmetic mean of the item-specific `A_i` matrices. For iid zero-mean page parameters, the expected normalized collision error is `1 - O/A`, where `A` is the number of semantic items and `O` is the number of occupied pages.
+Averaging this quantity estimates full-address collision probability without materializing the `N=2^r` address distribution. The normalized Rényi-2 deficit
 
-G2a verifies this law numerically with `phi(z)=tanh(Rz+b)` and a one-page, 4 KiB parameter budget.
+`Delta_2 = log(N C_2) = log N - H_2`
+
+is zero for a uniform composite-address distribution and can be computed from only `r=O(log N)` factor probabilities per example.
+
+This controls page collapse; it does not by itself tell the router which page is useful.
 
 ## 6. Non-claims
 
@@ -91,107 +107,123 @@ ParamProbe does not claim to invent:
 - cache-aware or stable expert routing;
 - SSD/flash-resident model parameters;
 - aligned/direct-I/O expert storage;
-- Error-Correcting Output Codes.
+- Error-Correcting Output Codes;
+- counterfactual or preference-based router training;
+- collision/Rényi load balancing in flat MoE systems.
 
-The intended novelty is the **hard external parameter-probe budget as an architectural/scaling constraint**, together with co-design of operator granularity, routing, learning, and physical storage under that constraint.
+The intended contribution is the **hard external parameter-probe budget as an architectural/scaling constraint**, together with co-design of operator granularity, scalable addressing, routing, training, and physical storage.
 
 ## 7. Falsification gates
 
 ### G0 — invariants — PASSED
 
-Initial deterministic checks establish:
+Reference tests establish exact factorized top-k retrieval on tested small spaces, file-backed/resident operator agreement, exact probe accounting, and exact `qB` logical bytes read.
 
-- exact factorized top-k retrieval matches brute force on tested small spaces;
-- file-backed operator output matches resident operator bytes;
-- logical probes equal selected block count exactly;
-- bytes read equal `q B` exactly.
+A 16 MiB store with `B=4096`, `q=2`, and 200 randomized trials produced exactly 8192 logical bytes/invocation and zero numerical disagreement from resident execution.
 
-A 16 MiB file-backed store with `B=4096`, `q=2`, and 200 randomized trials produced exactly 8192 logical bytes/invocation and zero numerical difference from resident execution.
+### G1 — associative capacity — PASSED WITH ROUTING LIMITATIONS
 
-### G1a — collision-limited associative capacity — PASSED
+A stateless one-probe associative memory matches an analytic collision law while external capacity grows at fixed 4096 bytes/query. A learned fixed-width router can also use additional pages when routing is sufficiently reliable.
 
-A stateless deterministic one-probe router isolates the capacity/I-O abstraction. On 16,384 iid associations, increasing external capacity from 0.25 MiB to 1 GiB reduced MSE from about 0.996 to 0.031 while parameter traffic remained exactly 4096 bytes/query. The curve closely tracks the analytic collision floor.
-
-### G1b — learned fixed-controller capacity — PASSED WITH A LIMITATION
-
-A single fixed 12-factor router was trained once and reused across the whole capacity sweep. A hard regime exposed the address-reliability wall; an easier regime demonstrated capacity gains at literally fixed controller parameters, routing MACs, `q`, and `B`.
-
-### G1c/G1d — coded addressing — PROMISING BUT CONDITIONAL
-
-A matched-compute Hamming(15,11) experiment improved exact-address accuracy and associative MSE, but a systematic code-rate precheck showed that redundant parity outputs can become harder to learn and erase the gain. Coding is therefore not assumed to solve routing universally.
+G1b exposes the address-reliability wall. G1c/G1d show that error-correcting addresses can help but are not universally beneficial.
 
 ### G2a — analytically controlled nonlinear operators — PASSED
 
-Each semantic item owns a nonlinear function
+For `f_i(z)=A_i tanh(Rz+b)`, a reliable fixed router gives a capacity curve that closely matches the analytic collision law while one 4 KiB page is active per query.
 
-`f_i(z) = A_i tanh(R z + b)`.
+### G2b — fully learned page MLP expressivity — PASSED
 
-The resident feature map, router architecture, active page multiply, `q=1`, and `B=4096` are fixed. One `64 x 16` FP32 matrix fills exactly one 4 KiB external parameter page.
+The reference 8→32→8 page MLP contains 552 FP32 learned parameters (2208 bytes) inside one 4096-byte page. With oracle routing used only to isolate page expressivity, three-seed held-out NMSE falls from approximately `0.998` at one page to `0.035` at 256 pages with identical active operator shape/MACs and one page probe.
 
-With a reliable fixed router, increasing pages from 1 to 4096 reduces normalized operator MSE from about 1 to 0 and matches the analytic collision law closely across three seeds. A deliberately noisy-router control leaves the oracle curve intact while the learned system fails to exploit larger capacity, separating capacity from routing reliability.
+### G2c — joint router/pages with semantic address supervision — PASSED AS A CONTROL
 
-See `docs/g2_operator_capacity.md`.
+With supervised semantic addresses, router and nonlinear pages train jointly and use the available page space without collapse. This establishes joint trainability but is not a task-only routing result.
 
-### G2b — fully learned page-sized nonlinear MLPs — PASSED
+### G2d — task-only local routing — NEGATIVE / CONSTRAINING
 
-Each selected page contains a complete two-layer tanh micro-MLP. The reference 8→32→8 operator has 552 FP32 learned parameters (2208 payload bytes) inside one 4096-byte parameter page. The active operator performs the same 512 matrix MACs/query at every capacity point.
+Task-only top-2-neighborhood training can discover useful specialization at high capacity but gives a non-monotone capacity curve. Factor-level balance does not guarantee composite-address utilization.
 
-Across three seeds with oracle routing to isolate operator expressivity, normalized held-out MSE changes as:
+### G2e — composite-address Rényi balancing — PASSED AS LOAD-BALANCING RESULT
 
-- 1 page: `0.9980 +/- 0.0005`;
-- 4 pages: `0.9878 +/- 0.0006`;
-- 16 pages: `0.9519 +/- 0.0029`;
-- 64 pages: `0.8318 +/- 0.0097`;
-- 256 pages: `0.0349 +/- 0.0004`.
+Full-address collision/Rényi regularization substantially improves composite page utilization without `O(N)` router state, but the adversarial task retains a small-capacity regression. Load balancing solves collapse, not routing utility.
 
-Only inactive external operator count changes. Active MLP shape, active compute, `q=1`, and parameter traffic of 4096 bytes/query remain fixed.
+### G2f — fixed-budget counterfactual utility routing — PASSED SYNTHETIC GATE
 
-The page layout is serializable and file-backed inference is separately tested under the one-probe contract.
+Training evaluates a fixed four candidate pages per example and distills their task utility into the factorized router. No semantic address labels are used. The candidate budget is fixed across all multi-page conditions, while inference remains exactly one 4 KiB page.
 
-### G2c — jointly trained routing + external operators — NEXT CORE GATE
+On an adversarial synthetic task with independent semantic contexts and teacher functions, three-seed NMSE is approximately:
 
-The next experiment must remove the remaining separation between routing and operator learning while retaining a fixed-resource comparison.
+- 1 page: `0.9856 +/- 0.0048`;
+- 4 pages: `0.9557 +/- 0.0133`;
+- 16 pages: `0.8258 +/- 0.0088`;
+- 64 pages: `0.2242 +/- 0.0567`.
 
-Requirements:
+This is the first task-only, no-address-label synthetic result with monotone improvement as inactive external capacity grows under a fixed inference probe budget.
 
-- router architecture/parameter count fixed across `N`;
-- page MLP shape fixed across `N`;
-- hard `q`-page inference path preserved;
-- task loss and routing mechanism trained in the same run;
-- report utilization entropy, dead-page fraction, page-update counts, routing stability under perturbation, and held-out task loss;
-- include oracle-routing and frozen-router controls to attribute failure correctly.
+See `docs/g2f_counterfactual_routing.md`.
 
-A result counts as progress only if extra external pages improve held-out quality without hidden `O(N)` resident routing state or increased active parameter traffic.
+### G3a — language-model capacity/insertion precheck — PASSED WITH FIXED DIAGNOSTIC ROUTER
 
-### G3 — language modeling — BLOCKED ON G2c
+The first LM attempt attached ParamProbe directly before the output head and **failed** monotone scaling. Diagnostics revealed two language-specific issues:
 
-Do not start language modeling merely because G2a/G2b pass. First demonstrate that routing and page-local operators can be learned together without collapse under the fixed probe/resource envelope.
+1. realized next-token counterfactual losses contain privileged future information, so the realized best page is not a valid direct causal routing target;
+2. an expected-utility critic can remove that leakage but may collapse page functions into redundant adapters.
 
-If G2c passes, compare against matched dense, flat sparse-memory, PEER-like, and conventional MoE baselines under resident-parameter, active-FLOP, and **external-bytes/token** constraints.
+A stable fixed context hash was then used to separate routing from insertion depth. The pre-head insertion still failed monotone scaling.
 
-Primary plot: validation loss versus total external learned capacity at fixed `M`, `C`, and `Q`.
+The successful controlled architecture is:
+
+`embedding -> Transformer block 1 -> ParamProbe -> Transformer block 2 -> LM head`.
+
+The frozen backbone, maximum six-factor hash metadata, routing MACs, active page operator, downstream compute, training schedule, `q=1`, and `B=4096` are fixed across the page-count sweep.
+
+The strict page MLP is `48 -> 10 -> 48`:
+
+- 1,018 FP32 learned parameters;
+- 4,072 learned bytes padded to one 4,096-byte page;
+- 960 active page matrix MACs/token.
+
+On the environment-local 1.2 MiB code-corpus precheck, frozen-backbone validation CE is `2.3027921`. Across three independent page-training seeds:
+
+- 1 page: `2.29944 +/- 0.00081`;
+- 4 pages: `2.29751 +/- 0.00037`;
+- 16 pages: `2.29629 +/- 0.00014`;
+- 64 pages: `2.29521 +/- 0.00028`.
+
+The ordering is monotone in every seed and there are no dead validation pages.
+
+This is **not yet a benchmark claim** because the execution environment used local source-code text after standard corpus download failed. See `docs/g3a_language_precheck.md`.
+
+### G3b — learned causal routing in language modeling — NEXT CORE GATE
+
+Keep the successful internal insertion and strict 4 KiB page operator, but replace the diagnostic fixed hash with a trainable factorized router.
+
+Critical methodology rule: the router target must be predictable from the causal hidden state. Do not directly distill the candidate page with lowest loss on the realized next token, because that target contains privileged future-label information.
+
+A pass requires:
+
+- fixed maximum-width router parameters/MACs across `N`;
+- one 4096-byte page probe/token at inference;
+- identical 1018-parameter active page MLP across `N`;
+- no semantic address labels;
+- monotone 1/4/16/64 held-out loss across multiple seeds;
+- a named standard language corpus;
+- comparisons to fixed-hash, one-page adapter, and matched sparse/MoE-style baselines.
 
 ### G4 — physical storage — BACKEND IMPLEMENTED, DEVICE STUDY PENDING
 
-An aligned Linux `O_DIRECT + preadv` backend bypasses the normal OS page cache using a reusable page-aligned buffer.
+Linux `O_DIRECT + preadv` support provides a reusable page-aligned direct-I/O backend. The local container precheck shows a strong block-size/throughput tradeoff, but those measurements are not publication hardware claims because the underlying storage/controller is uncharacterized.
 
-A local 512 MiB precheck confirms the benchmark path and shows a strong block-granularity tradeoff. Approximate random-read results on this uncharacterized container storage were:
+Publication-grade G4 requires named devices, repeated trials, queue-depth control, CPU measurements, and end-to-end operator timing.
 
-- 4 KiB: ~8.3k probes/s, ~32 MiB/s;
-- 16 KiB: ~15.3k probes/s, ~240 MiB/s;
-- 64 KiB: ~13.8k probes/s, ~865 MiB/s;
-- 256 KiB: ~9.5k probes/s, ~2.37 GiB/s.
+## 8. Implementation policy
 
-These are not hardware claims; device/controller caching is not controlled. Publication-grade G4 requires named devices, repeated trials, queue-depth control, CPU measurements, and end-to-end operator timing.
-
-## 8. Immediate implementation policy
-
-- NumPy/reference experiments are used where closed-form structure lets us isolate an invariant.
-- PyTorch is used for learned routing and neural-operator experiments.
-- `pread` is used for exact logical probe accounting.
-- `O_DIRECT + preadv` is used where supported for page-cache-bypassing physical-I/O experiments.
-- Training may keep the full page table resident for convenience, but inference/resource claims count only a selected-page execution path and must be separately serialized/validated.
-- Every experiment must emit the resource quantities it claims to hold fixed: external bytes, block bytes, selected blocks, logical bytes read, controller parameters, routing compute, active operator compute, and relevant cache/I/O mode.
+- Use NumPy/reference implementations where closed-form structure isolates an invariant.
+- Use PyTorch for learned routing/neural operators.
+- Use `pread` for exact logical probe accounting.
+- Use `O_DIRECT + preadv` where supported for page-cache-bypassing physical-I/O experiments.
+- Training may keep a complete page table resident for convenience, but inference claims require a separately serializable selected-page execution path.
+- Every experiment must report the resources it claims to hold fixed: external bytes, block bytes, selected pages, logical bytes read, resident routing metadata, routing compute, active operator compute, and I/O mode.
 - Negative results are retained when they constrain the hypothesis.
 
-The next core milestone is **G2c jointly trained routing and page-local operators under a fixed external parameter-probe budget**.
+The next core milestone is **G3b: learned causal routing at the successful internal language-model insertion point under the same one-page external parameter budget.**
