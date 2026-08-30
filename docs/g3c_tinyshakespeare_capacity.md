@@ -8,6 +8,10 @@ On the canonical Tiny Shakespeare corpus, the fixed-hash control is strictly mon
 
 Therefore the strict learned-router 256-page extension is **not passed**. The negative edge is retained rather than tuned away.
 
+Successful benchmark workflow run: `33323339227`.
+
+Result artifact: `g3c-tinyshakespeare-results`, artifact id `9735553536`, artifact SHA-256 `d1c5145932f4a824215f99c72f243c6049fa5879b9c1300b5189db3bd936167f`.
+
 ## Dataset
 
 The run downloads the canonical Karpathy `char-rnn` Tiny Shakespeare file:
