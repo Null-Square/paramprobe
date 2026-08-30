@@ -1,0 +1,85 @@
+name: G5 WikiText-2 capacity replication
+
+on:
+  push:
+    branches: [g3b-learned-causal-replication]
+    paths:
+      - "experiments/g5_wikitext2_capacity_lm.py"
+      - ".github/workflows/g5_wikitext2.yml"
+  workflow_dispatch:
+
+jobs:
+  wikitext2-capacity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install pinned CPU research dependencies
+        run: |
+          mkdir -p .cache results
+          python -m pip install --upgrade pip
+          python -m pip install "numpy==2.3.5"
+          python -m pip install "torch==2.10.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps
+      - name: Fetch and verify WikiText-2 raw
+        run: |
+          curl --fail --location --retry 3 \
+            https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-2-raw-v1.zip \
+            -o .cache/wikitext-2-raw-v1.zip
+          python - <<'PY' | tee results/dataset_archive.txt
+          import hashlib
+          from pathlib import Path
+          path = Path('.cache/wikitext-2-raw-v1.zip')
+          data = path.read_bytes()
+          digest = hashlib.sha256(data).hexdigest()
+          print(f'archive_bytes={len(data)}')
+          print(f'archive_sha256={digest}')
+          expected_size = 4721645
+          expected_sha = 'ef7edb566e3e2b2d31b29c1fdb0c89a4cc683597484c3dc2517919c615435a11'
+          if len(data) != expected_size or digest != expected_sha:
+              raise SystemExit('WikiText-2 raw archive identity mismatch')
+          PY
+          unzip -q .cache/wikitext-2-raw-v1.zip -d .cache/
+          python - <<'PY' | tee results/dataset_splits.txt
+          import hashlib
+          from pathlib import Path
+          root = Path('.cache/wikitext-2-raw')
+          for name in ['wiki.train.raw', 'wiki.valid.raw', 'wiki.test.raw']:
+              data = (root / name).read_bytes()
+              print(f'{name}_bytes={len(data)}')
+              print(f'{name}_sha256={hashlib.sha256(data).hexdigest()}')
+          PY
+      - name: Run frozen paired capacity protocol
+        env:
+          PYTHONPATH: .:src:experiments
+        run: |
+          PYTHONUNBUFFERED=1 python experiments/g5_wikitext2_capacity_lm.py \
+            --train-path .cache/wikitext-2-raw/wiki.train.raw \
+            --validation-path .cache/wikitext-2-raw/wiki.valid.raw \
+            --checkpoint .cache/g5_wikitext2_base.pt \
+            --retrain-backbone \
+            --used-bits 0,2,4,6,8 \
+            --seeds 7,8,9 \
+            | tee results/g5_wikitext2_capacity.txt
+      - name: Record environment
+        run: |
+          python - <<'PY' > results/environment.txt
+          import platform
+          import numpy
+          import torch
+          print(f'python={platform.python_version()}')
+          print(f'platform={platform.platform()}')
+          print(f'numpy={numpy.__version__}')
+          print(f'torch={torch.__version__}')
+          PY
+      - name: Upload G5 logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g5-wikitext2-results
+          path: results/
+          if-no-files-found: error
