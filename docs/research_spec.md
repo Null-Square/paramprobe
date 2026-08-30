@@ -1,4 +1,4 @@
-# ParamProbe research specification v0.7
+# ParamProbe research specification v0.8
 
 ## 1. Research question
 
@@ -91,9 +91,33 @@ At fixed 1 MiB external capacity with one probe, mean CE is `2.46392645` for 4 K
 
 The complete **frozen** Tiny Shakespeare controls, exact seed tables, workflow ids, and artifact digests are in `docs/g3d_j_tinyshakespeare_controls.md`.
 
-### G4 — physical storage — BACKEND IMPLEMENTED, DEVICE STUDY PENDING
+### G4a — direct-I/O backend precheck — PASSED AS IMPLEMENTATION CHECK
 
-Linux `O_DIRECT + preadv` support exists. Publication-grade G4 requires named devices, repeated trials, queue-depth control, CPU measurements, end-to-end operator timing, and serialized/file-backed execution of trained LM pages.
+Linux `O_DIRECT + preadv` support bypasses the ordinary OS page cache for explicit fixed-block parameter reads. The earlier random-byte block-size sweep establishes that the direct-I/O code path is functional and that page granularity materially changes latency/throughput, but those local measurements are not hardware claims.
+
+### G4b — trained LM file-backed execution — PASSED FUNCTIONAL STORAGE GATE
+
+A trained 64-page Tiny Shakespeare learned-router model is serialized into exact 4 KiB blocks and executed through both explicit `pread` and aligned `O_DIRECT + preadv` storage.
+
+On a deterministic 256-token validation batch:
+
+- resident CE: `2.52785110`;
+- serialized-block CE: `2.52785110`;
+- `pread` CE: `2.52785110`;
+- `O_DIRECT` CE: `2.52785110`;
+- maximum residual mismatch vs resident: `2.98e-8`;
+- `pread`: exactly 256 probes / 1,048,576 external bytes;
+- `O_DIRECT`: exactly 256 probes / 1,048,576 external bytes.
+
+Thus the executable trained-model path obeys exactly one 4,096-byte parameter probe per token.
+
+A systems-only mirrored-store sweep expands the backing file from 0.25 MiB to 256 MiB while preserving the learned function. Process RSS remains flat; the reusable direct-I/O buffer contributes only about 4 KiB of observed RSS. Warm `pread` collapses to about 10 us/probe even for the 256 MiB file, while first-pass/direct behavior is orders of magnitude slower/noisier, illustrating why page-cache-backed timing cannot stand in for physical-storage measurement.
+
+The run used a GitHub-hosted Azure VM exposing `MSFT NVMe Accelerator v1.0`; therefore its latency numbers are diagnostics, not publication hardware claims. See `docs/g4b_filebacked_lm.md`.
+
+### G4c — publication physical storage — PENDING
+
+Publication-grade physical validation still requires named bare-metal devices, repeated independent trials, queue-depth/concurrency control, cold/warm methodology, CPU measurements, pure-I/O versus page-operator versus full-token latency, and stores comfortably larger than host cache.
 
 ## 8. Implementation policy
 
@@ -101,9 +125,10 @@ Linux `O_DIRECT + preadv` support exists. Publication-grade G4 requires named de
 - Training may keep page tables resident, but inference claims require separately serializable selected-page execution.
 - Retain negative results.
 - Tiny Shakespeare is now **frozen**; do not tune its learned-router boundary post hoc.
+- Virtualized/cloud storage timing is diagnostic unless the physical storage stack is sufficiently characterized.
 
 ## 9. Current publication boundary
 
-> On canonical Tiny Shakespeare, inactive external page capacity can improve validation loss under a strict one-page external-parameter traffic budget and fixed active page compute. A paired fixed router scales monotonically through 256 pages. The present learned factorized router is strong through 64 pages but plateaus at 256, and conventional finite flat MoE routing remains lower-loss at `N=64`.
+> On canonical Tiny Shakespeare, inactive external page capacity can improve validation loss under a strict one-page external-parameter traffic budget and fixed active page compute. A paired fixed router scales monotonically through 256 pages. The present learned factorized router is strong through 64 pages but plateaus at 256, and conventional finite flat MoE routing remains lower-loss at `N=64`. The trained 64-page LM operator can be serialized and executed through real `pread` and `O_DIRECT` fixed-block storage with numerically equivalent outputs and exactly 4 KiB of explicit parameter traffic per token.
 
-This is **not yet Q1-ready evidence**. The remaining blockers are concrete: reproduce the capacity effect on at least a second named language corpus; execute trained LM pages through the serialized/file-backed storage path under the same measured probe contract; and demonstrate the effect on a larger or more standard language-model setting.
+This is **not yet Q1-ready evidence**. The largest remaining empirical blockers are now: reproduce the capacity effect on at least a second named language corpus; demonstrate it in a larger/more standard LM setting; and run the trained-page storage path on characterized bare-metal hardware. The former blocker—whether trained LM pages can actually execute through the serialized hard-probe path—has been resolved by G4b.
