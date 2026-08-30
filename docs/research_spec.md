@@ -1,4 +1,4 @@
-# ParamProbe research specification v0.9
+# ParamProbe research specification v1.0
 
 ## 1. Research question
 
@@ -39,11 +39,11 @@ For finite sweeps claiming fixed routing resources, maximum address width is all
 
 ParamProbe does not claim to invent model offloading, sparse MoE, Product-Key routing, learned sparse memory, SSD-resident parameters, direct-I/O expert storage, error-correcting output codes, counterfactual router training, or collision/Rényi load balancing.
 
-It does **not** claim a deterministic monotone scaling law in every individual training seed. WikiText-2 contains small adjacent-capacity reversals even though every evaluated seed improves from one to 256 pages and the three-seed mean is monotone.
+It does **not** claim a deterministic monotone scaling law in every individual training seed. Small adjacent-capacity reversals occur on WikiText-2 even though the endpoint capacity effect is sign-consistent across all evaluated seeds.
 
 It also does **not** claim finite-`N` LM quality superiority over conventional flat MoE routing. Tiny Shakespeare shows the opposite at `N=64`: a task-trained flat router is lower-loss than the current factorized learned router, even with an exact page-shape match and lower active matrix compute.
 
-The intended contribution is the **hard external parameter-probe budget as an architectural/scaling constraint**, together with scalable addressing, operator granularity, training, and physical storage.
+The intended contribution is the **hard external parameter-probe budget as an architectural/scaling constraint**, together with scalable addressing, operator granularity, compatible training, and physical storage execution.
 
 ## 7. Falsification gates
 
@@ -57,15 +57,15 @@ Synthetic gates establish conditional capacity and nonlinear page expressivity u
 
 ### G3a/G3b — LM insertion and learned-router architectural prechecks — PASSED THROUGH 64 PAGES
 
-The successful LM insertion is `embedding -> block 1 -> ParamProbe -> block 2 -> LM head`. The standard page is `48 -> 10 -> 48`, 1,018 FP32 parameters / 4,072 learned bytes inside one 4,096-byte page, 960 active page matrix MACs/token.
+The successful tiny-LM insertion is `embedding -> block 1 -> ParamProbe -> block 2 -> LM head`. The standard page is `48 -> 10 -> 48`, 1,018 FP32 parameters / 4,072 learned bytes inside one 4,096-byte page, 960 active page matrix MACs/token.
 
-A prefix-balanced, reliability-ordered causal router trained only from hidden states passes the local 1/4/16/64 architectural gate. No semantic address labels, realized next-token page targets, validation loss, or future-token information are used to train/order it.
+A prefix-balanced, reliability-ordered causal router trained only from hidden states passes the local `1/4/16/64` architectural gate. No semantic address labels, realized next-token page targets, validation loss, or future-token information are used to train/order it.
 
-### G3c/G3f — canonical Tiny Shakespeare capacity — FIXED ROUTER PASSES; LEARNED 256 BOUNDARY PERSISTS
+### G3c/G3f — canonical Tiny Shakespeare capacity — FIXED ROUTER PASSES; LEARNED 256 PLATEAU RETAINED
 
 Verified corpus: 1,115,394 bytes, Git blob SHA-1 `7dcb3a2d4cc3b48b6283dd46870bfeb78f88aac9`.
 
-Under `q=1`, `B=4096`, paired fixed-hash CE for 1/4/16/64/256 pages is:
+Under `q=1`, `B=4096`, paired fixed-hash CE for `1/4/16/64/256` pages is:
 
 `2.46687950 / 2.46569404 / 2.46455893 / 2.46409338 / 2.46395130`.
 
@@ -75,7 +75,7 @@ Paired learned-router CE is:
 
 `2.46687950 / 2.46534705 / 2.46422635 / 2.46244999 / 2.46245038`.
 
-Two of three seeds regress slightly at `64 -> 256`; the mean is effectively a plateau.
+Two of three seeds regress slightly at `64 -> 256`; the mean is effectively a plateau. This result is frozen rather than tuned away.
 
 ### G3g — compute-matched dense control — PARAMPROBE LOWER LOSS
 
@@ -91,11 +91,11 @@ This is a genuine constraint. Flat routing uses resident metadata linear in maxi
 
 At fixed 1 MiB external capacity with one probe, mean CE is `2.46392645` for 4 KiB / 256 pages, `2.46253466` for 16 KiB / 64 pages, and `2.46337525` for 64 KiB / 16 pages. 16 KiB wins all three seeds.
 
-The complete **frozen** Tiny Shakespeare controls, exact seed tables, workflow ids, and artifact digests are in `docs/g3d_j_tinyshakespeare_controls.md`.
+The complete frozen Tiny Shakespeare controls, seed tables, workflow ids, and artifact digests are in `docs/g3d_j_tinyshakespeare_controls.md`.
 
 ### G4a — direct-I/O backend precheck — PASSED AS IMPLEMENTATION CHECK
 
-Linux `O_DIRECT + preadv` support bypasses the ordinary OS page cache for explicit fixed-block parameter reads. The earlier random-byte block-size sweep establishes that the direct-I/O code path is functional and that page granularity materially changes latency/throughput, but those local measurements are not hardware claims.
+Linux `O_DIRECT + preadv` support bypasses the ordinary OS page cache for explicit fixed-block parameter reads. The random-byte block-size sweep establishes that the direct-I/O code path is functional and that page granularity materially changes latency/throughput, but those virtualized measurements are not hardware claims.
 
 ### G4b — trained LM file-backed execution — PASSED FUNCTIONAL STORAGE GATE
 
@@ -103,47 +103,65 @@ A trained 64-page Tiny Shakespeare learned-router model is serialized into exact
 
 On a deterministic 256-token validation batch, resident, serialized-block, `pread`, and `O_DIRECT` CE are all `2.52785110`; maximum residual mismatch is `2.98e-8`. Both file-backed paths execute exactly 256 probes / 1,048,576 bytes = 4,096 explicit parameter bytes/token.
 
-A systems-only mirrored-store sweep expands the backing file from 0.25 MiB to 256 MiB while preserving the learned function. Process RSS remains flat; the reusable direct-I/O buffer contributes only about 4 KiB of observed RSS. The run used a virtualized Azure `MSFT NVMe Accelerator v1.0`, so its latency values remain diagnostic rather than publication hardware claims. See `docs/g4b_filebacked_lm.md`.
+A systems-only mirrored-store sweep expands the backing file from 0.25 MiB to 256 MiB while preserving the learned function. Process RSS remains flat. The run used a virtualized Azure `MSFT NVMe Accelerator v1.0`, so its latency values remain diagnostic rather than publication hardware claims. See `docs/g4b_filebacked_lm.md`.
 
 ### G4c — publication physical storage — PENDING
 
 Publication-grade physical validation still requires named bare-metal devices, repeated independent trials, queue-depth/concurrency control, cold/warm methodology, CPU measurements, pure-I/O versus page-operator versus full-token latency, and stores comfortably larger than host cache.
 
-### G5 — WikiText-2 raw frozen replication — MEAN TREND REPLICATES; STRICT GATES FAIL
+### G5 — WikiText-2 raw frozen replication — MEAN TREND REPLICATES; ORIGINAL STRICT GATES FAIL
 
-G5 changes only the corpus to the official WikiText-2 raw train/validation split. The original archive identity is hard-checked at 4,721,645 bytes / SHA-256 `ef7edb566e3e2b2d31b29c1fdb0c89a4cc683597484c3dc2517919c615435a11`. The frozen architecture, optimizer, routing protocol, paired minibatches, seeds, page shape, `q=1`, and 4 KiB/token traffic remain unchanged.
+G5 changes only the corpus to the official WikiText-2 raw train/validation split. The original archive identity is hard-checked at 4,721,645 bytes / SHA-256 `ef7edb566e3e2b2d31b29c1fdb0c89a4cc683597484c3dc2517919c615435a11`. The frozen architecture, optimizer, routing protocol, paired minibatches, page shape, `q=1`, and 4 KiB/token traffic remain unchanged.
 
-Fixed-hash three-seed mean CE for 1/4/16/64/256 pages is:
+Fixed-hash three-seed mean CE for `1/4/16/64/256` pages is:
 
 `2.48237525 / 2.48208454 / 2.48137037 / 2.48090410 / 2.48012896`.
 
-The mean is strictly monotone and every seed improves from one to 256 pages. Seed 8 has a local `1 -> 4` regression of `+0.00016380`, so the predeclared every-step/every-seed gate does **not** pass.
+Seed 8 has a small local `1 -> 4` reversal, so the predeclared every-step/every-seed fixed gate does not pass.
 
-Learned-router mean CE is:
+Learned-router three-seed mean CE is:
 
 `2.48237525 / 2.48138192 / 2.47995500 / 2.47904339 / 2.47891196`.
 
-Again, the mean is strictly monotone and every seed improves from one to 256 pages. Seed 7 has a tiny `64 -> 256` regression of `+0.00002435`, so the strict learned gate also does **not** pass.
+Seed 7 has a tiny `64 -> 256` reversal, so the original strict learned gate also does not pass. These outcomes are frozen. See `docs/g5_wikitext2_capacity.md`.
 
-The endpoint mean improvements are `-0.00224628` CE for fixed routing and `-0.00346329` CE for learned routing. See `docs/g5_wikitext2_capacity.md`.
+### G5b — WikiText-2 predeclared robustness seeds — ROBUST CAPACITY TREND
 
-The correct cross-corpus interpretation is therefore:
+G5b was declared only after G5 and adds ten independent page-training seeds (`10..19`) under the unchanged protocol. It is an estimation study, not a retroactive redefinition of G5.
 
-> On two named language corpora, increasing inactive page capacity under fixed one-page traffic produces a monotone improvement in the three-seed mean and a lower 256-page loss than the one-page condition in every evaluated seed. Small adjacent-capacity reversals remain possible, especially near the learned address-reliability boundary.
+Across the combined 13 seeds `7..19`, fixed-routing mean CE is:
 
-This is evidence for a capacity **trend**, not a deterministic monotone law.
+`2.48249533 / 2.48209350 / 2.48130979 / 2.48081780 / 2.48003056`.
+
+- 256 pages beats one page in 13/13 seeds;
+- 11/13 seeds are strictly monotone over all four adjacent capacity steps;
+- stepwise improvement counts are `11/13, 13/13, 13/13, 13/13`;
+- paired mean `1 -> 256` change is `-0.00246477` CE, approximate 95% Student-t interval `[-0.00262678, -0.00230275]`.
+
+Learned-routing mean CE is:
+
+`2.48249533 / 2.48128070 / 2.47973229 / 2.47903057 / 2.47877004`.
+
+- 256 pages beats one page in 13/13 seeds;
+- 12/13 seeds are strictly monotone over all four adjacent steps;
+- stepwise improvement counts are `13/13, 13/13, 13/13, 12/13`;
+- paired mean `64 -> 256` change is `-0.00026053` CE, approximate 95% interval `[-0.00036150, -0.00015955]`;
+- paired mean `1 -> 256` change is `-0.00372529` CE, approximate 95% interval `[-0.00389656, -0.00355401]`.
+
+The isolated G5 learned seed-7 reversal is therefore better interpreted as a small stochastic local reversal than as evidence for a universal 256-page wall on WikiText-2. Tiny Shakespeare's 256-page learned plateau remains a separate frozen constraining result. Full details are in `docs/g5b_wikitext2_robustness.md`.
 
 ## 8. Implementation and evidence policy
 
 - Report external bytes, block bytes, selected pages, logical bytes read, resident routing metadata, routing compute, active operator compute, and I/O mode.
 - Training may keep page tables resident, but inference claims require separately serializable selected-page execution.
 - Retain negative results and infrastructure-only failures separately from scientific results.
-- Tiny Shakespeare and the three-seed WikiText-2 G5 gate are **frozen**; do not tune either post hoc.
-- Additional seeds must be named as a new estimation/robustness study and cannot retroactively change the G5 gate outcome.
+- Tiny Shakespeare and the original three-seed WikiText-2 G5 gate are frozen; do not tune either post hoc.
+- Additional seed studies cannot retroactively change earlier pass/fail criteria.
+- Any larger-model gate must predeclare model scale, tokenization, insertion point, page size, capacity sweep, router resources, optimizer, seeds, and pass criteria before observing its capacity results.
 - Virtualized/cloud storage timing is diagnostic unless the physical storage stack is sufficiently characterized.
 
 ## 9. Current publication boundary
 
-> Across canonical Tiny Shakespeare and WikiText-2 raw, inactive external page capacity improves the mean validation loss under a strict one-page external-parameter traffic budget and fixed active page compute. Every evaluated seed has lower loss at 256 pages than at one page, although small adjacent-capacity reversals prevent a universal per-seed monotonicity claim. A learned factorized router is competitive with the fixed routing controls but encounters an eight-factor reliability/optimization boundary; conventional finite flat MoE routing remains lower-loss at `N=64`. Separately, trained LM pages execute through real `pread` and `O_DIRECT` fixed-block storage with numerically equivalent outputs and exactly 4 KiB of explicit parameter traffic per token.
+> Across canonical Tiny Shakespeare and WikiText-2 raw, inactive external page capacity improves mean validation loss under a strict one-page external-parameter traffic budget and fixed active page compute. On WikiText-2, the endpoint benefit is sign-consistent across all 13 evaluated page-training seeds for both fixed and learned factorized routing; learned routing is strictly monotone through 256 pages in 12/13 seeds. This is evidence for a robust capacity trend, not a deterministic per-seed scaling law. Conventional finite flat MoE routing remains lower-loss at `N=64` in the tiny benchmark. Separately, trained LM pages execute through real `pread` and `O_DIRECT` fixed-block storage with numerically equivalent outputs and exactly one page of explicit parameter traffic per token.
 
-This is **not yet Q1-ready evidence**. The second-corpus blocker has been substantially reduced but not eliminated: the cross-corpus mean trend replicates, while the strict per-seed gate does not. The largest remaining empirical blockers are now: quantify robustness with a predeclared larger seed set; demonstrate the effect in a larger/more standard LM setting; and run the trained-page storage path on characterized bare-metal hardware.
+This is **not yet Q1-ready evidence**. The second-corpus robustness blocker is now substantially reduced. The largest remaining empirical blockers are: demonstrate the effect in a materially larger, subword-tokenized LM setting; run the trained-page storage path on characterized bare-metal hardware; and then evaluate whether the quality/latency/capacity tradeoff remains compelling at realistic scale.
