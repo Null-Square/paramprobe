@@ -2,7 +2,7 @@
 
 ## Status
 
-**MIXED / CONSTRAINING, WITH A ROBUST CAPACITY EFFECT.**
+**FROZEN TINY SHAKESPEARE CONTROL SUITE — MIXED / CONSTRAINING, WITH A ROBUST CAPACITY EFFECT.**
 
 This suite freezes the original G3c Tiny Shakespeare result and tests the main reviewer-facing alternatives without tuning the learned-router boundary.
 
