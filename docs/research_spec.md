@@ -1,4 +1,4 @@
-# ParamProbe research specification v0.5
+# ParamProbe research specification v0.6
 
 ## 1. Research question
 
@@ -192,23 +192,78 @@ On the environment-local 1.2 MiB code-corpus precheck, frozen-backbone validatio
 
 The ordering is monotone in every seed and there are no dead validation pages.
 
-This is **not yet a benchmark claim** because the execution environment used local source-code text after standard corpus download failed. See `docs/g3a_language_precheck.md`.
+This is **not a benchmark claim** because the execution environment used local source-code text after standard corpus download failed. See `docs/g3a_language_precheck.md`.
 
-### G3b — learned causal routing in language modeling — NEXT CORE GATE
+### G3b — learned causal routing architectural precheck — PASSED THROUGH 64 PAGES
 
-Keep the successful internal insertion and strict 4 KiB page operator, but replace the diagnostic fixed hash with a trainable factorized router.
+G3b keeps the successful internal insertion and strict 4 KiB page operator while replacing the fixed hash with a causal learned factorized router.
 
-Critical methodology rule: the router target must be predictable from the causal hidden state. Do not directly distill the candidate page with lowest loss on the realized next token, because that target contains privileged future-label information.
+The first strict shared-router reconstruction is retained as a negative result: it improved strongly at 16/64 pages but seed 9 had a small `1 -> 4` regression.
 
-A pass requires:
+A predeclared follow-up then added:
 
-- fixed maximum-width router parameters/MACs across `N`;
-- one 4096-byte page probe/token at inference;
-- identical 1018-parameter active page MLP across `N`;
-- no semantic address labels;
-- monotone 1/4/16/64 held-out loss across multiple seeds;
-- a named standard language corpus;
-- comparisons to fixed-hash, one-page adapter, and matched sparse/MoE-style baselines.
+1. equal composite Rényi-2 balance on the raw 2-, 4-, and 6-factor prefixes;
+2. router freezing before page training;
+3. a fixed factor order chosen only from clean-vs-perturbed hard-bit agreement on a deterministic training-hidden-state bank.
+
+No semantic page labels, realized next-token counterfactual targets, validation loss, or future-token information are used to train or order the router.
+
+On the same environment-local diagnostic corpus, three page-training seeds give:
+
+- 1 page: `2.29944 +/- 0.00081`;
+- 4 pages: `2.29802 +/- 0.00018`;
+- 16 pages: `2.29423 +/- 0.00031`;
+- 64 pages: `2.29165 +/- 0.00025`.
+
+The ordering is strictly monotone in every seed. There are no dead validation pages. `q=1`, the page payload remains 4,072 learned bytes inside one 4,096-byte block, and logical external parameter traffic remains exactly 4,096 bytes/token.
+
+This passes the **architectural learned-router precheck through 64 pages**, but it remains a local-corpus diagnostic rather than a named benchmark result.
+
+See `docs/g3b_learned_causal_routing.md` and `docs/g3b_prefix_reliable_routing.md`.
+
+### G3c — Tiny Shakespeare named-corpus capacity sweep — MIXED / CONSTRAINING
+
+G3c freezes the G3 architecture/training protocol, switches to canonical Tiny Shakespeare, allocates an eight-factor maximum address width, and evaluates `N = 1, 4, 16, 64, 256` on a fresh common frozen backbone.
+
+The canonical corpus is verified before training by Git blob SHA-1:
+
+`7dcb3a2d4cc3b48b6283dd46870bfeb78f88aac9`.
+
+The frozen-backbone validation CE is `2.47749685`.
+
+#### Fixed-hash control
+
+Three-seed mean validation CE is:
+
+- 1 page: `2.46669 +/- 0.00092`;
+- 4 pages: `2.46565 +/- 0.00023`;
+- 16 pages: `2.46457 +/- 0.00015`;
+- 64 pages: `2.46395 +/- 0.00009`;
+- 256 pages: `2.46370 +/- 0.00014`.
+
+The fixed-hash ordering is strictly monotone in **every seed through 256 pages** while `q=1`, `B=4096`, and active page compute remain fixed. At 256 pages, normalized hard-route entropy is about `0.721` and 9.375% of pages are dead on validation, so the capacity effect does not require perfect page utilization.
+
+#### Learned prefix-balanced reliability-ordered router
+
+Three-seed mean validation CE is:
+
+- 1 page: `2.46669 +/- 0.00092`;
+- 4 pages: `2.46544 +/- 0.00019`;
+- 16 pages: `2.46427 +/- 0.00007`;
+- 64 pages: **`2.46245 +/- 0.00024`**;
+- 256 pages: `2.46251 +/- 0.00009`.
+
+All three seeds improve monotonically through 64 pages. Seed 7 also improves at 256 pages, but seeds 8 and 9 regress slightly at `64 -> 256`, and the mean change is `+0.00005844` CE. Therefore the strict learned-router 256-page extension is **not passed**.
+
+At 256 pages, learned-router utilization entropy remains about `0.924`, dead-page fraction is only `0.0039`, but full-address perturbation stability has fallen to about `0.817`. The coincidence is consistent with the earlier address-reliability warning but does not establish causality.
+
+The learned router is lower-loss than the fixed hash at matched page count from 4 through 256 pages, but this is not a total-compute-matched comparison because the learned router uses more routing MACs.
+
+G3c therefore supports a narrow named-corpus capacity claim while preserving a learned-routing scaling boundary:
+
+> On Tiny Shakespeare, validation loss improves as external inactive page capacity grows at fixed one-page external traffic and fixed active page compute. A fixed hash remains monotone through 256 pages; the current learned causal router is robust through 64 pages and marginally non-monotone at 256 pages.
+
+See `docs/g3c_tinyshakespeare_capacity.md` and `.github/workflows/g3c_tinyshakespeare.yml`.
 
 ### G4 — physical storage — BACKEND IMPLEMENTED, DEVICE STUDY PENDING
 
@@ -226,4 +281,4 @@ Publication-grade G4 requires named devices, repeated trials, queue-depth contro
 - Every experiment must report the resources it claims to hold fixed: external bytes, block bytes, selected pages, logical bytes read, resident routing metadata, routing compute, active operator compute, and I/O mode.
 - Negative results are retained when they constrain the hypothesis.
 
-The next core milestone is **G3b: learned causal routing at the successful internal language-model insertion point under the same one-page external parameter budget.**
+The next core milestone is **matched Tiny Shakespeare baselines and page-size sweeps**, while keeping the G3c `64 -> 256` learned-router regression frozen rather than tuning it away.
