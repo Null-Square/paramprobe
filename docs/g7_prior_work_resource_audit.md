@@ -74,6 +74,34 @@ ParamProbe interpretation:
 - its selected learned object is one embedding vector rather than one complete nonlinear operator;
 - thus the meaningful distinction is physical/index probe accounting plus operator expressivity, not simply “one learned object is selected.”
 
+## Mixture of Lookup Experts (MoLE) — Jie et al., ICML 2025
+
+Primary source: `https://proceedings.mlr.press/v267/jie25b.html`.
+
+Native mechanism:
+
+- routed experts are FFNs during training, but their inputs are embedding tokens rather than arbitrary intermediate hidden states;
+- all `N` routed experts are activated during training, with softmax router weights;
+- before inference, every routed expert output is precomputed for every vocabulary item, producing an offloadable LUT;
+- for token id `i`, inference retrieves the precomputed output vector `v_j^i` for **every one of the N routed experts**, combines them with router weights, and retains a resident shared FFN;
+- the paper's complexity analysis therefore gives offloaded LUT size `d N |V|` and **parameters loaded per token `dN`**;
+- its published MoLE-4E and MoLE-16E models consequently retrieve 4 or 16 routed-expert output vectors/token, respectively.
+
+Systems evidence:
+
+- the LUT is explicitly offloaded to storage while non-LUT model parameters remain in VRAM;
+- the paper reports decoding latency comparable to dense models and much lower than conventional expert offloading;
+- its main communication argument is that loading `dN` precomputed outputs is orders of magnitude smaller than loading selected FFN parameters;
+- the paper reports the LUT can be several times larger than the original offloaded expert parameters and explores post-training LUT quantization.
+
+ParamProbe interpretation:
+
+- MoLE is strong prior art for **storage-resident precomputed neural computation results** and low-communication expert offload;
+- its selected learned traffic is bounded with respect to LUT capacity for fixed `N` and `d`, but native communication scales linearly with the number of routed experts `N` because all `N` output vectors are loaded/token;
+- the published MoLE-16E therefore does not satisfy a `q=1` learned-object contract;
+- MoLE also changes the external object from a complete executable nonlinear operator to a token-indexed precomputed output vector, trading context-dependent operator application for much lower transfer volume;
+- ParamProbe must therefore not claim novelty merely from precomputing/offloading neural outputs or obtaining low expert-offload communication.
+
 ## PEER — He, 2024
 
 Primary source: `https://arxiv.org/abs/2407.04153`.
@@ -90,7 +118,7 @@ ParamProbe interpretation:
 
 - native PEER already demonstrates sparse expert capacity with sublinear addressing;
 - its published configuration is not `q=1`, but product-key routing can be adapted to top-1 retrieval;
-- unlike DSE/SCONE, PEER retrieves nonlinear experts, making it the closest architectural competitor to page-sized ParamProbe operators;
+- unlike DSE/SCONE/MoLE's inference LUT objects, PEER retrieves nonlinear experts, making it the closest architectural competitor to page-sized ParamProbe operators;
 - the G7 executable test therefore forces a PEER-style product-key router to `q=1` while holding the full ParamProbe 16 KiB page operator identical.
 
 ## ParamProbe's surviving candidate distinction after the audit
@@ -99,7 +127,7 @@ The audit **rejects** a broad novelty claim of the form:
 
 > “learned capacity can scale while a constant number/amount of parameters is activated or retrieved.”
 
-DSE, SCONE, PEER, PKM, and MoE literature already occupy substantial parts of that space.
+DSE, SCONE, MoLE, PEER, PKM, and MoE/offload literature already occupy substantial parts of that space.
 
 The candidate contribution must instead be narrower and testable:
 
@@ -112,6 +140,6 @@ The remaining novelty questions are:
 1. Can a product-key expert router satisfy the same finite `q=1`, block size, active page compute, and resident router envelope while matching or beating ParamProbe quality? G7 executes this test.
 2. Does ParamProbe's logarithmic/factorized address scaling provide a practically useful advantage over product-key `sqrt(N)` metadata/work at capacities large enough for the asymptotics to matter?
 3. Does exact one-block direct-I/O execution remain competitive on characterized bare-metal NVMe once external learned stores are much larger than host cache?
-4. Does storing a **complete nonlinear operator per block** yield a useful quality/byte/probe tradeoff relative to embedding-memory methods such as DSE/SCONE?
+4. Does storing a **complete nonlinear operator per block** yield a useful quality/byte/probe tradeoff relative to embedding/output-memory methods such as DSE, SCONE, and MoLE?
 
 These questions—not generic sparse capacity—should determine the eventual paper claim.
