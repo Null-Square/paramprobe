@@ -1,0 +1,62 @@
+name: G8 address-scaling crossover
+
+on:
+  push:
+    branches: [g3b-learned-causal-replication]
+    paths:
+      - "experiments/g8_address_scaling_crossover.py"
+      - "docs/g8_address_scaling_crossover_predeclared.md"
+      - "docs/g8_timing_addendum_predeclared.md"
+      - ".github/workflows/g8_address_scaling_crossover.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  address-scaling-crossover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned CPU dependencies
+        run: |
+          mkdir -p results
+          python -m pip install --upgrade pip
+          python -m pip install "torch==2.10.0" --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Run frozen G8 protocol
+        env:
+          PYTHONPATH: .:src:experiments
+        run: |
+          set -o pipefail
+          PYTHONUNBUFFERED=1 python experiments/g8_address_scaling_crossover.py \
+            | tee results/g8_address_scaling_crossover.txt
+
+      - name: Record environment
+        if: always()
+        run: |
+          python - <<'PY' > results/environment.txt
+          import platform
+          import torch
+          print(f'python={platform.python_version()}')
+          print(f'platform={platform.platform()}')
+          print(f'torch={torch.__version__}')
+          print(f'torch_threads={torch.get_num_threads()}')
+          print(f'torch_interop_threads={torch.get_num_interop_threads()}')
+          PY
+
+      - name: Upload G8 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g8-address-scaling-crossover-results
+          path: results/
+          if-no-files-found: error
