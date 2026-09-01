@@ -1,0 +1,88 @@
+name: G3f paired Tiny Shakespeare capacity replication
+
+on:
+  push:
+    branches: [g3b-learned-causal-replication]
+    paths:
+      - "experiments/g3f_paired_capacity_lm.py"
+      - ".github/workflows/g3f_paired_capacity.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "experiments/g3f_paired_capacity_lm.py"
+      - ".github/workflows/g3f_paired_capacity.yml"
+  workflow_dispatch:
+
+jobs:
+  paired-capacity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned CPU research dependencies
+        run: |
+          mkdir -p .cache results
+          python -m pip install --upgrade pip
+          python -m pip install "numpy==2.3.5"
+          python -m pip install "torch==2.10.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps
+
+      - name: Fetch canonical Tiny Shakespeare corpus
+        run: |
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt \
+            -o .cache/tinyshakespeare.txt
+          python - <<'PY' | tee results/dataset.txt
+          import hashlib
+          from pathlib import Path
+          data = Path('.cache/tinyshakespeare.txt').read_bytes()
+          blob_sha = hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest()
+          print(f'bytes={len(data)}')
+          print(f'sha256={hashlib.sha256(data).hexdigest()}')
+          print(f'git_blob_sha1={blob_sha}')
+          expected = '7dcb3a2d4cc3b48b6283dd46870bfeb78f88aac9'
+          if blob_sha != expected:
+              raise SystemExit(f'canonical corpus mismatch: {blob_sha} != {expected}')
+          PY
+
+      - name: Run paired fixed-hash and learned-router capacity replication
+        run: |
+          PYTHONUNBUFFERED=1 python experiments/g3f_paired_capacity_lm.py \
+            --text-path .cache/tinyshakespeare.txt \
+            --corpus-bytes 1200000 \
+            --checkpoint .cache/g3f_tinyshakespeare_base.pt \
+            --retrain-backbone \
+            --max-bits 8 \
+            --used-bits 0,2,4,6,8 \
+            --balance-prefixes 2,4,6,8 \
+            --seeds 7,8,9 \
+            | tee results/g3f_paired_capacity.txt
+
+      - name: Record environment
+        if: always()
+        run: |
+          mkdir -p results
+          python - <<'PY' > results/environment.txt
+          import platform
+          import numpy
+          import torch
+          print(f'python={platform.python_version()}')
+          print(f'platform={platform.platform()}')
+          print(f'numpy={numpy.__version__}')
+          print(f'torch={torch.__version__}')
+          print(f'torch_threads={torch.get_num_threads()}')
+          PY
+
+      - name: Upload paired replication logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g3f-paired-capacity-results
+          path: results/
+          if-no-files-found: error

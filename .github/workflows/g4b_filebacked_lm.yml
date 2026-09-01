@@ -1,0 +1,95 @@
+name: G4b trained LM file-backed probes
+
+on:
+  push:
+    branches: [g3b-learned-causal-replication]
+    paths:
+      - "experiments/g4b_filebacked_lm_probe.py"
+      - "src/paramprobe/store.py"
+      - "src/paramprobe/page_mlp.py"
+      - ".github/workflows/g4b_filebacked_lm.yml"
+  workflow_dispatch:
+
+jobs:
+  filebacked-lm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install pinned CPU research dependencies
+        run: |
+          mkdir -p .cache results
+          python -m pip install --upgrade pip
+          python -m pip install "numpy==2.3.5"
+          python -m pip install "torch==2.10.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps
+      - name: Fetch canonical Tiny Shakespeare corpus
+        run: |
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt \
+            -o .cache/tinyshakespeare.txt
+          python - <<'PY' | tee results/dataset.txt
+          import hashlib
+          from pathlib import Path
+          data = Path('.cache/tinyshakespeare.txt').read_bytes()
+          blob_sha = hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest()
+          print(f'bytes={len(data)}')
+          print(f'sha256={hashlib.sha256(data).hexdigest()}')
+          print(f'git_blob_sha1={blob_sha}')
+          expected = '7dcb3a2d4cc3b48b6283dd46870bfeb78f88aac9'
+          if blob_sha != expected:
+              raise SystemExit(f'canonical corpus mismatch: {blob_sha} != {expected}')
+          PY
+      - name: Record storage and runner topology
+        run: |
+          {
+            echo "github_run_id=${GITHUB_RUN_ID}"
+            echo "github_sha=${GITHUB_SHA}"
+            echo "runner_name=${RUNNER_NAME}"
+            echo "runner_os=${RUNNER_OS}"
+            uname -a
+            echo "--- lscpu ---"
+            lscpu
+            echo "--- lsblk ---"
+            lsblk -o NAME,MODEL,SERIAL,ROTA,TYPE,SIZE,FSTYPE,MOUNTPOINTS || true
+            echo "--- findmnt workspace ---"
+            findmnt -T "$GITHUB_WORKSPACE" -o TARGET,SOURCE,FSTYPE,OPTIONS || true
+            echo "--- df workspace ---"
+            df -hT "$GITHUB_WORKSPACE" || true
+          } | tee results/storage_environment.txt
+      - name: Run trained page file-backed validation
+        env:
+          PYTHONPATH: .:src:experiments
+        run: |
+          PYTHONUNBUFFERED=1 python experiments/g4b_filebacked_lm_probe.py \
+            --text-path .cache/tinyshakespeare.txt \
+            --corpus-bytes 1200000 \
+            --checkpoint .cache/g4b_tinyshakespeare_base.pt \
+            --retrain-backbone \
+            --used-bits 6 \
+            --page-seed 7 \
+            --store-pages 64 1024 16384 65536 \
+            --sweep-probes 4096 \
+            | tee results/g4b_filebacked_lm.txt
+      - name: Record Python environment
+        run: |
+          python - <<'PY' > results/python_environment.txt
+          import platform
+          import numpy
+          import torch
+          print(f'python={platform.python_version()}')
+          print(f'platform={platform.platform()}')
+          print(f'numpy={numpy.__version__}')
+          print(f'torch={torch.__version__}')
+          PY
+      - name: Upload G4b logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g4b-filebacked-lm-results
+          path: results/
+          if-no-files-found: error

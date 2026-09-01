@@ -1,0 +1,113 @@
+name: G6f learned-router larger-LM scale gate
+
+on:
+  push:
+    branches: [g3b-learned-causal-replication]
+    paths:
+      - "experiments/g6f_learned_router_scale.py"
+      - "docs/g6f_learned_router_scale_predeclared.md"
+      - ".github/workflows/g6f_learned_router_scale.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  learned-router-scale:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned CPU research dependencies
+        run: |
+          mkdir -p .cache results
+          python -m pip install --upgrade pip
+          python -m pip install "numpy==2.3.5" "tokenizers==0.23.1"
+          python -m pip install "torch==2.10.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps
+
+      - name: Download exact frozen G6a assets
+        uses: actions/download-artifact@v4
+        with:
+          name: g6a-subword-scale-results
+          path: .cache/g6a_frozen
+          github-token: ${{ github.token }}
+          repository: Null-Square/paramprobe
+          run-id: 33333431198
+
+      - name: Verify frozen asset hashes
+        run: |
+          python - <<'PY' | tee results/frozen_assets.txt
+          import hashlib
+          from pathlib import Path
+          expected = {
+              '.cache/g6a_frozen/g6a_tokenizer.json': '230e4b73ac91279affde8c9c62bd35bde2fdecbf0ec3d91578aa7bb1a651eedb',
+              '.cache/g6a_frozen/g6a_subword_base.pt': 'a97146674da7758be0952184191076bc822e3d52fff57210facb50e00b655049',
+          }
+          for path_text, wanted in expected.items():
+              path = Path(path_text)
+              got = hashlib.sha256(path.read_bytes()).hexdigest()
+              print(f'{path.name}_sha256={got}')
+              if got != wanted:
+                  raise SystemExit(f'frozen asset mismatch: {path.name}')
+          PY
+
+      - name: Fetch and verify WikiText-2 raw
+        run: |
+          curl --fail --location --retry 3 \
+            'https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip?download=true' \
+            -o .cache/wikitext-2-raw-v1.zip
+          python - <<'PY' | tee results/dataset_archive.txt
+          import hashlib
+          from pathlib import Path
+          data = Path('.cache/wikitext-2-raw-v1.zip').read_bytes()
+          digest = hashlib.sha256(data).hexdigest()
+          print(f'archive_bytes={len(data)}')
+          print(f'archive_sha256={digest}')
+          if len(data) != 4721645 or digest != 'ef7edb566e3e2b2d31b29c1fdb0c89a4cc683597484c3dc2517919c615435a11':
+              raise SystemExit('WikiText-2 raw archive identity mismatch')
+          PY
+          unzip -q .cache/wikitext-2-raw-v1.zip -d .cache/
+
+      - name: Run frozen G6f protocol
+        env:
+          PYTHONPATH: .:src:experiments
+        run: |
+          set -o pipefail
+          PYTHONUNBUFFERED=1 python experiments/g6f_learned_router_scale.py \
+            --train-path .cache/wikitext-2-raw/wiki.train.raw \
+            --validation-path .cache/wikitext-2-raw/wiki.valid.raw \
+            --tokenizer-json .cache/g6a_frozen/g6a_tokenizer.json \
+            --checkpoint .cache/g6a_frozen/g6a_subword_base.pt \
+            | tee results/g6f_learned_router_scale.txt
+
+      - name: Record environment
+        if: always()
+        run: |
+          python - <<'PY' > results/environment.txt
+          import platform
+          import numpy
+          import torch
+          import tokenizers
+          print(f'python={platform.python_version()}')
+          print(f'platform={platform.platform()}')
+          print(f'numpy={numpy.__version__}')
+          print(f'torch={torch.__version__}')
+          print(f'tokenizers={tokenizers.__version__}')
+          print(f'torch_threads={torch.get_num_threads()}')
+          PY
+
+      - name: Upload G6f results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g6f-learned-router-scale-results
+          path: results/
+          if-no-files-found: error

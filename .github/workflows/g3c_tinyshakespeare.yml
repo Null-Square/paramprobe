@@ -1,0 +1,92 @@
+name: G3c Tiny Shakespeare capacity sweep
+
+on:
+  workflow_dispatch:
+
+jobs:
+  tinyshakespeare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned research dependencies
+        run: |
+          mkdir -p .cache results
+          python -m pip install --upgrade pip
+          python -m pip install "numpy==2.3.5"
+          python -m pip install "torch==2.10.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps
+
+      - name: Fetch canonical Tiny Shakespeare corpus
+        run: |
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt \
+            -o .cache/tinyshakespeare.txt
+          python - <<'PY' | tee results/dataset.txt
+          import hashlib
+          from pathlib import Path
+          path = Path('.cache/tinyshakespeare.txt')
+          data = path.read_bytes()
+          blob_sha = hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest()
+          print(f'bytes={len(data)}')
+          print(f'sha256={hashlib.sha256(data).hexdigest()}')
+          print(f'git_blob_sha1={blob_sha}')
+          expected = '7dcb3a2d4cc3b48b6283dd46870bfeb78f88aac9'
+          if blob_sha != expected:
+              raise SystemExit(f'canonical corpus mismatch: {blob_sha} != {expected}')
+          PY
+
+      - name: Fixed-hash control and fresh backbone
+        run: |
+          PYTHONUNBUFFERED=1 python experiments/g3a_internal_fixed_hash_lm.py \
+            --text-path .cache/tinyshakespeare.txt \
+            --corpus-bytes 1200000 \
+            --checkpoint .cache/g3c_tinyshakespeare_base.pt \
+            --retrain-backbone \
+            --max-bits 8 \
+            --used-bits 0,2,4,6,8 \
+            --seeds 7,8,9 \
+            | tee results/fixed_hash.txt
+
+      - name: Prefix-balanced reliability-ordered learned router
+        run: |
+          PYTHONUNBUFFERED=1 python experiments/g3b_prefix_reliable_lm.py \
+            --text-path .cache/tinyshakespeare.txt \
+            --corpus-bytes 1200000 \
+            --checkpoint .cache/g3c_tinyshakespeare_base.pt \
+            --router-checkpoint .cache/g3c_tinyshakespeare_prefix_router.pt \
+            --retrain-router \
+            --max-bits 8 \
+            --used-bits 0,2,4,6,8 \
+            --balance-prefixes 2,4,6,8 \
+            --seeds 7,8,9 \
+            | tee results/prefix_reliable.txt
+
+      - name: Record environment
+        if: always()
+        run: |
+          mkdir -p results
+          python - <<'PY' > results/environment.txt
+          import platform
+          import numpy
+          import torch
+          print(f'python={platform.python_version()}')
+          print(f'platform={platform.platform()}')
+          print(f'numpy={numpy.__version__}')
+          print(f'torch={torch.__version__}')
+          print(f'torch_threads={torch.get_num_threads()}')
+          PY
+
+      - name: Upload benchmark logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g3c-tinyshakespeare-results
+          path: results/
+          if-no-files-found: error

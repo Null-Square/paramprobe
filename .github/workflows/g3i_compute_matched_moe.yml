@@ -1,0 +1,93 @@
+name: G3i compute-matched flat MoE
+
+on:
+  push:
+    branches: [g3b-learned-causal-replication]
+    paths:
+      - ".github/workflows/g3i_compute_matched_moe.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/g3i_compute_matched_moe.yml"
+  workflow_dispatch:
+
+jobs:
+  matched-moe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install pinned CPU research dependencies
+        run: |
+          mkdir -p .cache results
+          python -m pip install --upgrade pip
+          python -m pip install "numpy==2.3.5"
+          python -m pip install "torch==2.10.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps
+      - name: Fetch canonical Tiny Shakespeare corpus
+        run: |
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt \
+            -o .cache/tinyshakespeare.txt
+          python - <<'PY' | tee results/dataset.txt
+          import hashlib
+          from pathlib import Path
+          data = Path('.cache/tinyshakespeare.txt').read_bytes()
+          blob_sha = hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest()
+          print(f'bytes={len(data)}')
+          print(f'sha256={hashlib.sha256(data).hexdigest()}')
+          print(f'git_blob_sha1={blob_sha}')
+          expected = '7dcb3a2d4cc3b48b6283dd46870bfeb78f88aac9'
+          if blob_sha != expected:
+              raise SystemExit(f'canonical corpus mismatch: {blob_sha} != {expected}')
+          PY
+      - name: Run total-compute-matched 64-way flat MoE
+        run: |
+          PYTHONUNBUFFERED=1 python experiments/g3d_tinyshakespeare_baselines.py \
+            --text-path .cache/tinyshakespeare.txt \
+            --corpus-bytes 1200000 \
+            --checkpoint .cache/g3i_tinyshakespeare_base.pt \
+            --retrain-backbone \
+            --max-experts 64 \
+            --expert-hidden-dim 15 \
+            --block-bytes 8192 \
+            --expert-counts 1,4,16,64 \
+            --seeds 7,8,9 \
+            | tee results/g3i_compute_matched_moe.txt
+          python - <<'PY' | tee -a results/g3i_compute_matched_moe.txt
+          d = 48
+          h = 15
+          max_experts = 64
+          router_macs = d * max_experts
+          expert_macs = 2 * d * h
+          total_macs = router_macs + expert_macs
+          print(f'matched_router_macs={router_macs}')
+          print(f'matched_expert_macs={expert_macs}')
+          print(f'matched_total_matrix_macs={total_macs}')
+          print('paramprobe_total_matrix_macs=4544')
+          print(f'mac_difference={4544-total_macs}')
+          PY
+      - name: Record environment
+        if: always()
+        run: |
+          mkdir -p results
+          python - <<'PY' > results/environment.txt
+          import platform
+          import numpy
+          import torch
+          print(f'python={platform.python_version()}')
+          print(f'platform={platform.platform()}')
+          print(f'numpy={numpy.__version__}')
+          print(f'torch={torch.__version__}')
+          PY
+      - name: Upload matched MoE logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g3i-compute-matched-moe-results
+          path: results/
+          if-no-files-found: error
