@@ -1,0 +1,35 @@
+name: G10 reproduction bundle
+
+on:
+  push:
+    branches: [research/g10-publication-audit]
+    paths: [.github/workflows/g10_repro_bundle.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive source and pinned public dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bundle
+          git archive --format=tar.gz HEAD > bundle/paramprobe-source.tar.gz
+          git rev-parse HEAD > bundle/source_commit.txt
+          curl --fail --location --retry 3 \
+            'https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip?download=true' \
+            -o bundle/wikitext-2-raw-v1.zip
+          echo 'ef7edb566e3e2b2d31b29c1fdb0c89a4cc683597484c3dc2517919c615435a11  bundle/wikitext-2-raw-v1.zip' | sha256sum --check
+          sha256sum bundle/* > bundle/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: g10-reproduction-bundle
+          path: bundle/
+          if-no-files-found: error
+          retention-days: 30
