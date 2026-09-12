@@ -1,0 +1,75 @@
+name: G10 frozen KV functional audit
+
+on:
+  push:
+    branches: [research/g10-publication-audit]
+    paths: [.github/workflows/g10_functional_audit.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned CPU dependencies
+        run: |
+          mkdir -p results
+          python -m pip install 'numpy==2.3.5' 'tokenizers==0.23.1'
+          python -m pip install 'torch==2.10.0' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps
+      - uses: actions/download-artifact@v4
+        with:
+          name: g6a-subword-scale-results
+          path: .cache/g6a_frozen
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 33333431198
+      - uses: actions/download-artifact@v4
+        with:
+          name: g10-reproduction-bundle
+          path: .cache/bundle
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 34688056478
+      - name: Verify assets and record diagnostic status
+        run: |
+          set -euo pipefail
+          echo '230e4b73ac91279affde8c9c62bd35bde2fdecbf0ec3d91578aa7bb1a651eedb  .cache/g6a_frozen/g6a_tokenizer.json' | sha256sum --check
+          echo 'a97146674da7758be0952184191076bc822e3d52fff57210facb50e00b655049  .cache/g6a_frozen/g6a_subword_base.pt' | sha256sum --check
+          echo 'ef7edb566e3e2b2d31b29c1fdb0c89a4cc683597484c3dc2517919c615435a11  .cache/bundle/wikitext-2-raw-v1.zip' | sha256sum --check
+          unzip -q .cache/bundle/wikitext-2-raw-v1.zip -d .cache/
+          git rev-parse HEAD > results/source_commit.txt
+          python -m pip freeze > results/environment.txt
+          echo 'Post-hoc diagnostics after G9b closure; no changed training settings or new optimization.' > results/diagnostic_status.txt
+          sha256sum experiments/g9b_balanced_local_kv.py experiments/g10_kv_functional_audit.py src/paramprobe/soft_memory_audit.py > results/source_sha256.txt
+      - name: Unchanged G9b with read-only functional instrumentation
+        env:
+          PYTHONPATH: .:src:experiments
+          OMP_NUM_THREADS: '2'
+          MKL_NUM_THREADS: '2'
+          TOKENIZERS_PARALLELISM: 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONUNBUFFERED=1 python experiments/g10_kv_functional_audit.py \
+            --train-path .cache/wikitext-2-raw/wiki.train.raw \
+            --validation-path .cache/wikitext-2-raw/wiki.valid.raw \
+            --tokenizer-json .cache/g6a_frozen/g6a_tokenizer.json \
+            --checkpoint .cache/g6a_frozen/g6a_subword_base.pt \
+            --audit-output results/functional_audit --threads 2 \
+            | tee results/g9b_with_functional_audit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: g10-kv-functional-audit
+          path: results/
+          if-no-files-found: error
+          retention-days: 90
