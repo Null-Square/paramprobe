@@ -1,0 +1,77 @@
+name: G10 unchanged G9b closure
+
+on:
+  push:
+    branches: [research/g10-publication-audit]
+    paths: [.github/workflows/g10_g9b_closure.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  frozen-g9b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Pinned dependencies and portable tokenizer wheel
+        run: |
+          mkdir -p results wheels
+          python -m pip install 'numpy==2.3.5' 'tokenizers==0.23.1'
+          python -m pip install 'torch==2.10.0' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps
+          python -m pip download --only-binary=:all: --no-deps 'tokenizers==0.23.1' -d wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: g10-tokenizer-wheel
+          path: wheels/
+      - uses: actions/download-artifact@v4
+        with:
+          name: g6a-subword-scale-results
+          path: .cache/g6a_frozen
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 33333431198
+      - uses: actions/download-artifact@v4
+        with:
+          name: g10-reproduction-bundle
+          path: .cache/bundle
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 34688056478
+      - name: Verify unchanged experiment and assets
+        run: |
+          set -euo pipefail
+          echo '894350bd8953bcd3479220a29b5fcd92e5b4058aca7e121db551b777ec0f32b7  experiments/g9b_balanced_local_kv.py' | sha256sum --check
+          echo '2d4893dfff1c8eff0ba5f416635869b1237ed9cdcae53a00c173e4674a11b99e  docs/g9b_balanced_local_kv_predeclared.md' | sha256sum --check
+          echo '230e4b73ac91279affde8c9c62bd35bde2fdecbf0ec3d91578aa7bb1a651eedb  .cache/g6a_frozen/g6a_tokenizer.json' | sha256sum --check
+          echo 'a97146674da7758be0952184191076bc822e3d52fff57210facb50e00b655049  .cache/g6a_frozen/g6a_subword_base.pt' | sha256sum --check
+          echo 'ef7edb566e3e2b2d31b29c1fdb0c89a4cc683597484c3dc2517919c615435a11  .cache/bundle/wikitext-2-raw-v1.zip' | sha256sum --check
+          unzip -q .cache/bundle/wikitext-2-raw-v1.zip -d .cache/
+          git rev-parse HEAD > results/source_commit.txt
+          python -m pip freeze > results/environment.txt
+          sha256sum experiments/g9b_balanced_local_kv.py docs/g9b_balanced_local_kv_predeclared.md > results/protocol_sha256.txt
+      - name: Run original G9b without modifications
+        env:
+          PYTHONPATH: .:src:experiments
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONUNBUFFERED=1 python experiments/g9b_balanced_local_kv.py \
+            --train-path .cache/wikitext-2-raw/wiki.train.raw \
+            --validation-path .cache/wikitext-2-raw/wiki.valid.raw \
+            --tokenizer-json .cache/g6a_frozen/g6a_tokenizer.json \
+            --checkpoint .cache/g6a_frozen/g6a_subword_base.pt \
+            | tee results/g9b_balanced_local_kv.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: g10-g9b-closure-results
+          path: results/
+          if-no-files-found: error
+          retention-days: 90
